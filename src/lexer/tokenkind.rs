@@ -1,0 +1,55 @@
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenKind {
+    // keywords/control
+    KwITest,
+    KwNotest,
+    KwInotest,
+    KwInhibit,
+    KwRelease,
+    KwEmitln,
+    KwEmit,
+    KwSynthesize,
+    // decl
+    KwAtom,
+    KwMolecule,
+    KwReaction,
+    // types
+    KwSymbol,
+    KwAtomNum,
+    KwMass,
+    KwPolarized,
+    KwVoidState,
+    KwFormula,
+    KwIon,
+    // logical
+    And,
+    Or,
+    Not,
+    // general
+    Ident,
+    Number,
+    StringLit,
+    // operators / signs
+    Assign,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Semi,
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    Colon,
+    Comma,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Eq,
+    Ne,
+    EndOfFile,
+}
