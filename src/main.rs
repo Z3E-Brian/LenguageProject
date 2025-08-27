@@ -1,6 +1,7 @@
 mod parser;
 mod lexer;
 use lexer::Lexer;
+mod utils;
 
 fn main() {
     let code = r#"

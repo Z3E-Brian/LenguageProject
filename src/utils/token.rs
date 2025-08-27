@@ -10,7 +10,6 @@ pub struct Token {
     pub col: usize,
 }
 
-/* implementacion de getters
 impl Token {
     pub fn get_kind(&self) -> TokenKind {
         self.kind
@@ -27,7 +26,7 @@ impl Token {
     pub fn get_col(&self) -> usize {
         self.col
     }
-}*/
+}
 
 impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
