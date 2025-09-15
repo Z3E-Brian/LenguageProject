@@ -52,3 +52,29 @@ pub enum TokenKind {
     Ne,
     EndOfFile,
 }
+
+pub type Block = Vec<Stmt>;
+
+#[derive(Debug, Clone)]
+pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion }
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    VarDecl { name: String, ty: TypeName, init: Option<Expr> },   // atom / molecule decl
+    ConstDecl { name: String, ty: TypeName, value: Expr },        // ion const
+    Assign { name: String, value: Expr },
+    If { arms: Vec<(Expr, Block)>, else_block: Option<Block> },
+    EmitLn(Expr),
+    Emit(Expr),
+    ReactionDecl { name: String, params: Vec<(String, TypeName)>, body: Block },
+    Block(Block),
+}
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    LitNumber(String),
+    LitString(String),
+    Ident(String),
+    Unary { op: TokenKind, rhs: Box<Expr> },
+    Binary { lhs: Box<Expr>, op: TokenKind, rhs: Box<Expr> },
+}
