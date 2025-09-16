@@ -55,15 +55,17 @@ pub enum TokenKind {
 
 pub type Block = Vec<Stmt>;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion }
+pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion, Custom(String) }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    VarDecl { name: String, ty: TypeName, init: Option<Expr> },   // atom / molecule decl
-    ConstDecl { name: String, ty: TypeName, value: Expr },        // ion const
+    VarDecl { name: String, ty: TypeName, init: Option<Expr> },
+    ConstDecl { name: String, ty: TypeName, value: Expr },
     Assign { name: String, value: Expr },
     If { arms: Vec<(Expr, Block)>, else_block: Option<Block> },
+    ExprStmt(Expr),
     EmitLn(Expr),
     Emit(Expr),
     ReactionDecl { name: String, params: Vec<(String, TypeName)>, body: Block },

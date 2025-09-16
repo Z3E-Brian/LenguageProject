@@ -1,26 +1,35 @@
-use crate::utils::enums::TokenKind;
-use crate::utils::enums::TypeName;
-use crate::utils::enums::Stmt;
-use crate::utils::enums::Expr;
+// parser.rs
+// Combina lo mejor de ambas versiones: cobertura completa + ExprStmt + ; tolerantes + TypeName::Custom + errores tipados
+
+use crate::utils::enums::{Expr, Stmt, TokenKind, TypeName};
 use crate::utils::token::Token;
 use std::fmt;
 
-// ===================== AST =====================
+// ===================== Tipos auxiliares =====================
 
 pub type Program = Vec<Stmt>;
-pub type Block = Vec<Stmt>;
+pub type Block   = Vec<Stmt>;
+
+#[derive(Debug)]
+pub struct ParseError {
+    pub message: String,
+    pub line: usize,
+    pub col: usize,
+}
 
 // Hace que los campos de Expr “se usen” al imprimir y evita warnings de dead_code
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expr::LitNumber(s)   => write!(f, "{s}"),
-            Expr::LitString(s)   => write!(f, "\"{s}\""),
-            Expr::Ident(id)      => write!(f, "{id}"),
+            Expr::LitNumber(s) => write!(f, "{s}"),
+            Expr::LitString(s) => write!(f, "\"{s}\""),
+            Expr::Ident(id)    => write!(f, "{id}"),
             Expr::Unary { op, rhs } =>
                 write!(f, "({:?} {})", op, rhs),
             Expr::Binary { lhs, op, rhs } =>
                 write!(f, "({} {:?} {})", lhs, op, rhs),
+            // Si tu Expr tiene más variantes, agrégalas aquí para un print legible
+            _ => write!(f, "{:?}", self),
         }
     }
 }
@@ -32,16 +41,10 @@ pub struct Parser {
     pos: usize,
 }
 
-#[derive(Debug)]
-pub struct ParseError {
-    pub message: String,
-    pub line: usize,
-    pub col: usize,
-}
-
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self { Self { tokens, pos: 0 } }
 
+    // ---------- util ----------
     fn peek(&self) -> &Token {
         self.tokens.get(self.pos).unwrap_or(self.tokens.last().unwrap())
     }
@@ -70,14 +73,36 @@ impl Parser {
         }
     }
 
+    // Versión no-ruidosa para backtracking en asignación
+    fn try_parse_assign_stmt(&mut self) -> Result<Stmt, ()> {
+        let save = self.pos;
+        if !self.check(&TokenKind::Ident) { return Err(()); }
+        let name = self.advance().lexeme.clone();
+        if !self.check(&TokenKind::Assign) { self.pos = save; return Err(()); }
+        self.advance();
+        match self.parse_expr(0) {
+            Ok(value) => {
+                if self.match_next(&[TokenKind::Semi]) {
+                    Ok(Stmt::Assign { name, value })
+                } else {
+                    self.pos = save;
+                    Err(())
+                }
+            }
+            Err(_) => { self.pos = save; Err(()) }
+        }
+    }
+
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut stmts = Vec::new();
         while !self.is_at_end() {
+            if self.match_next(&[TokenKind::Semi]) { continue; }
             stmts.push(self.parse_stmt()?);
         }
         Ok(stmts)
     }
 
+    // ---------- sentencias ----------
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         use TokenKind::*;
         match self.peek().kind {
@@ -88,7 +113,17 @@ impl Parser {
             KwEmit              => self.parse_emit_stmt(false),
             KwReaction          => self.parse_reaction_decl(),
             LBrace              => self.parse_block().map(Stmt::Block),
-            Ident               => self.parse_assign_stmt(),
+            Ident               => {
+                if let Ok(stmt) = self.try_parse_assign_stmt() { return Ok(stmt); }
+                let e = self.parse_expr(0)?;
+                self.consume(Semi, "Se esperaba ';' tras expresión")?;
+                Ok(Stmt::ExprStmt(e))
+            }
+            Number | StringLit | LParen | Plus | Minus | Not => {
+                let e = self.parse_expr(0)?;
+                self.consume(Semi, "Se esperaba ';' tras expresión")?;
+                Ok(Stmt::ExprStmt(e))
+            }
             _ => {
                 let t = self.peek().clone();
                 Err(ParseError { message: format!("Token inesperado en sentencia: {:?}", t.kind), line: t.line, col: t.col })
@@ -100,6 +135,7 @@ impl Parser {
         self.consume(TokenKind::LBrace, "Se esperaba '{' para iniciar bloque")?;
         let mut items = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.is_at_end() {
+            if self.match_next(&[TokenKind::Semi]) { continue; }
             items.push(self.parse_stmt()?);
         }
         self.consume(TokenKind::RBrace, "Se esperaba '}' para cerrar bloque")?;
@@ -131,56 +167,37 @@ impl Parser {
         Ok(Stmt::ConstDecl { name, ty, value })
     }
 
-    fn parse_assign_stmt(&mut self) -> Result<Stmt, ParseError> {
-        let name = self.consume(TokenKind::Ident, "Se esperaba identificador")?.lexeme;
-        self.consume(TokenKind::Assign, "Se esperaba '='")?;
-        let value = self.parse_expr(0)?;
-        self.consume(TokenKind::Semi, "Se esperaba ';'")?;
-        Ok(Stmt::Assign { name, value })
-    }
-
     fn parse_if_stmt(&mut self) -> Result<Stmt, ParseError> {
-        self.consume(TokenKind::KwITest, "Falta 'itest'")?;
-        self.consume(TokenKind::LParen, "Se esperaba '('")?;
+        use TokenKind::*;
+        self.consume(KwITest, "Falta 'itest'")?;
+        self.consume(LParen, "Se esperaba '('")?;
         let cond = self.parse_expr(0)?;
-        self.consume(TokenKind::RParen, "Se esperaba ')'")?;
+        self.consume(RParen, "Se esperaba ')'")?;
 
         // Permite bloque o una sola sentencia
-        let then_block = if self.check(&TokenKind::LBrace) {
-            self.parse_block()?
-        } else {
-            vec![ self.parse_stmt()? ]
-        };
+        let then_block = if self.check(&LBrace) { self.parse_block()? } else { vec![ self.parse_stmt()? ] };
 
         let mut arms = vec![(cond, then_block)];
 
-        while self.match_next(&[TokenKind::KwInotest]) {
-            self.consume(TokenKind::LParen, "Se esperaba '('")?;
+        // else-if como inotest
+        while self.match_next(&[KwInotest]) {
+            self.consume(LParen, "Se esperaba '('")?;
             let c = self.parse_expr(0)?;
-            self.consume(TokenKind::RParen, "Se esperaba ')'")?;
-            let blk = if self.check(&TokenKind::LBrace) {
-                self.parse_block()?
-            } else { vec![ self.parse_stmt()? ] };
+            self.consume(RParen, "Se esperaba ')'")?;
+            let blk = if self.check(&LBrace) { self.parse_block()? } else { vec![ self.parse_stmt()? ] };
             arms.push((c, blk));
         }
 
-        let else_block = if self.match_next(&[TokenKind::KwNotest]) {
-            if self.check(&TokenKind::LBrace) {
-                Some(self.parse_block()?)
-            } else {
-                Some(vec![ self.parse_stmt()? ])
-            }
+        let else_block = if self.match_next(&[KwNotest]) {
+            if self.check(&LBrace) { Some(self.parse_block()?) } else { Some(vec![ self.parse_stmt()? ]) }
         } else { None };
 
         Ok(Stmt::If { arms, else_block })
     }
 
     fn parse_emit_stmt(&mut self, with_newline: bool) -> Result<Stmt, ParseError> {
-        if with_newline {
-            self.consume(TokenKind::KwEmitln, "Falta 'emitln'")?;
-        } else {
-            self.consume(TokenKind::KwEmit, "Falta 'emit'")?;
-        }
+        if with_newline { self.consume(TokenKind::KwEmitln, "Falta 'emitln'")?; }
+        else             { self.consume(TokenKind::KwEmit,   "Falta 'emit'")?;  }
         let e = self.parse_expr(0)?;
         self.consume(TokenKind::Semi, "Se esperaba ';'")?;
         Ok(if with_newline { Stmt::EmitLn(e) } else { Stmt::Emit(e) })
@@ -188,49 +205,28 @@ impl Parser {
 
     fn parse_reaction_decl(&mut self) -> Result<Stmt, ParseError> {
         // reaction <Ident> '(' param_list? ')' block
-        self.consume(TokenKind::KwReaction, "Falta 'reaction'")?;
-        let name = self.consume(TokenKind::Ident, "Se esperaba nombre de función")?.lexeme;
-        self.consume(TokenKind::LParen, "Se esperaba '('")?;
+        use TokenKind::*;
+        self.consume(KwReaction, "Falta 'reaction'")?;
+        let name = self.consume(Ident, "Se esperaba nombre de función")?.lexeme;
+        self.consume(LParen, "Se esperaba '('")?;
         let mut params = Vec::new();
-        if !self.check(&TokenKind::RParen) {
+        if !self.check(&RParen) {
             loop {
                 // Acepta dos formas:  nombre : tipo  ||  tipo nombre
-                use TokenKind::*;
-
-                // helper: intenta leer un tipo
-                let read_type = |this: &mut Parser| -> Option<TypeName> {
-                    match this.peek().kind {
-                        KwAtomNum | KwMass | KwPolarized | KwVoidState | KwFormula | KwSymbol | KwIon => {
-                            let k = this.advance().kind; // consume keyword de tipo
-                            Some(match k {
-                                KwAtomNum   => TypeName::AtomNum,
-                                KwMass      => TypeName::Mass,
-                                KwPolarized => TypeName::Polarized,
-                                KwVoidState => TypeName::VoidState,
-                                KwFormula   => TypeName::Formula,
-                                KwSymbol    => TypeName::Symbol,
-                                KwIon       => TypeName::Ion,
-                                _ => unreachable!(),
-                            })
-                        }
-                        _ => None,
-                    }
-                };
-
                 let first = self.peek().clone();
                 let (pname, pty) = match first.kind {
                     // nombre : tipo
                     Ident => {
-                        let name = self.advance().lexeme.clone(); // Ident
+                        let pname = self.advance().lexeme.clone(); // Ident
                         self.consume(Colon, "Se esperaba ':' tras el nombre del parámetro")?;
                         let ty = self.parse_type()?;
-                        (name, ty)
+                        (pname, ty)
                     }
                     // tipo nombre
                     KwAtomNum | KwMass | KwPolarized | KwVoidState | KwFormula | KwSymbol | KwIon => {
-                        let ty = read_type(self).expect("tipo válido");
-                        let name = self.consume(Ident, "Se esperaba nombre de parámetro tras el tipo")?.lexeme;
-                        (name, ty)
+                        let ty = self.parse_type()?; // ya consume el keyword
+                        let pname = self.consume(Ident, "Se esperaba nombre de parámetro tras el tipo")?.lexeme;
+                        (pname, ty)
                     }
                     _ => {
                         return Err(ParseError {
@@ -244,12 +240,13 @@ impl Parser {
                 if self.match_next(&[Comma]) { continue; } else { break; }
             }
         }
-        self.consume(TokenKind::RParen, "Se esperaba ')'")?;
+        self.consume(RParen, "Se esperaba ')'")?;
         let body = self.parse_block()?;
         Ok(Stmt::ReactionDecl { name, params, body })
     }
 
     fn parse_type(&mut self) -> Result<TypeName, ParseError> {
+        // keywords conocidos + Ident como Custom
         let tk = self.advance().clone();
         let ty = match tk.kind {
             TokenKind::KwAtomNum   => TypeName::AtomNum,
@@ -259,6 +256,7 @@ impl Parser {
             TokenKind::KwFormula   => TypeName::Formula,
             TokenKind::KwSymbol    => TypeName::Symbol,
             TokenKind::KwIon       => TypeName::Ion,
+            TokenKind::Ident       => TypeName::Custom(tk.lexeme),
             _ => return Err(ParseError{ message: "Tipo no válido".into(), line: tk.line, col: tk.col }),
         };
         Ok(ty)
@@ -303,7 +301,7 @@ impl Parser {
             LParen    => {
                 let e = self.parse_expr(0)?;
                 self.consume(RParen, "Falta ')'")?;
-                Ok(e)
+                Ok(e) // si quieres preservar, puedes usar Expr::Group(Box::new(e))
             }
             _ => Err(ParseError { message: format!("Expresión inválida. Encontré {:?}", t.kind), line: t.line, col: t.col })
         }
@@ -323,7 +321,7 @@ impl Parser {
 }
 
 // ====== Precedencias / binding powers ======
-
+// Mantiene el estilo claro (lbp, rbp) del primer parser
 fn infix_bp(op: &TokenKind) -> Option<(u8, u8)> {
     use TokenKind::*;
     match op {
@@ -340,7 +338,7 @@ fn infix_bp(op: &TokenKind) -> Option<(u8, u8)> {
 fn prefix_bp(op: &TokenKind) -> Option<u8> {
     use TokenKind::*;
     match op {
-        Minus | Not => Some(13),
+        Minus | Not | Plus => Some(13), // admite +unario también
         _ => None,
     }
 }
@@ -367,7 +365,7 @@ pub fn print_ast(stmts: &Program) {
                 println!("{p}Assign {} = {}", name, value);
             }
             Stmt::EmitLn(e) => println!("{p}Emitln {}", e),
-            Stmt::Emit(e) => println!("{p}Emit {}", e),
+            Stmt::Emit(e)   => println!("{p}Emit {}", e),
             Stmt::If { arms, else_block } => {
                 println!("{p}If");
                 for (i, (cond, blk)) in arms.iter().enumerate() {
@@ -391,7 +389,269 @@ pub fn print_ast(stmts: &Program) {
                 print_block(b, indent + 2);
                 println!("{p}}}");
             }
+            Stmt::ExprStmt(e) => println!("{p}ExprStmt {}", e),
+            _ => println!("{p}{:?}", s),
         }
     }
     for s in stmts { print_stmt(s, 0); }
+}
+
+/*
+pub fn print_ast(stmts: &Program) {
+    for (i, s) in stmts.iter().enumerate() {
+        let last = i + 1 == stmts.len();
+        print_stmt_tree(s, "", last);
+    }
+}
+
+fn print_stmt_tree(s: &Stmt, prefix: &str, is_last: bool) {
+    let (curr, child_prefix) = branch(prefix, is_last);
+    match s {
+        Stmt::VarDecl { name: _, ty: _, init } => {
+            println!("{curr}VarDecl");
+            if let Some(e) = init {
+                print_expr_tree(e, &child_prefix, true);
+            }
+        }
+        Stmt::ConstDecl { .. } => {
+            println!("{curr}ConstDecl");
+            // Podrías imprimir el value como subnodo Expr:
+            // print_expr_tree(value, &child_prefix, true);
+        }
+        Stmt::Assign { name: _, value } => {
+            println!("{curr}Assign");
+            print_expr_tree(value, &child_prefix, true);
+        }
+        Stmt::EmitLn(e) => {
+            println!("{curr}Emitln");
+            print_expr_tree(e, &child_prefix, true);
+        }
+        Stmt::Emit(e) => {
+            println!("{curr}Emit");
+            print_expr_tree(e, &child_prefix, true);
+        }
+        Stmt::If { arms, else_block } => {
+            println!("{curr}If");
+            for (j, (cond, blk)) in arms.iter().enumerate() {
+                let last_arm = j + 1 == arms.len() && else_block.is_none();
+                let (curr2, child2) = branch(&child_prefix, last_arm);
+                println!("{curr2}Arm");
+                // cond
+                print_expr_tree(cond, &child2, blk.is_empty());
+                // block
+                if !blk.is_empty() {
+                    print_block_tree(blk, &child2, true);
+                }
+            }
+            if let Some(eb) = else_block {
+                print_block_tree(eb, &child_prefix, true);
+            }
+        }
+        Stmt::ReactionDecl { .. } => {
+            println!("{curr}ReactionDecl");
+            // Si quieres mostrar params/cuerpo como nodos hijos:
+            // for (k,(pname, _pty)) in params.iter().enumerate() {
+            //     let (c, ch) = branch(&child_prefix, k + 1 == params.len() && body.is_empty());
+            //     println!("{c}Param");
+            // }
+            // if !body.is_empty() { print_block_tree(body, &child_prefix, true); }
+        }
+        Stmt::Block(b) => {
+            println!("{curr}Block");
+            print_block_tree(b, &child_prefix, true);
+        }
+        Stmt::ExprStmt(e) => {
+            println!("{curr}ExprStmt");
+            print_expr_tree(e, &child_prefix, true);
+        }
+    }
+}
+
+fn print_block_tree(b: &Block, prefix: &str, as_single_child: bool) {
+    if b.is_empty() {
+        let (curr, _) = branch(prefix, true);
+        println!("{curr}∅");
+        return;
+    }
+    if as_single_child {
+        // Cuando el bloque se imprime como “hijo único” (p.ej. en If/Else), dibujamos el label:
+        let (curr, child_prefix) = branch(prefix, true);
+        println!("{curr}Block");
+        for (i, s) in b.iter().enumerate() {
+            print_stmt_tree(s, &child_prefix, i + 1 == b.len());
+        }
+    } else {
+        for (i, s) in b.iter().enumerate() {
+            print_stmt_tree(s, prefix, i + 1 == b.len());
+        }
+    }
+}
+
+fn print_expr_tree(e: &Expr, prefix: &str, is_last: bool) {
+    let (curr, child_prefix) = branch(prefix, is_last);
+    match e {
+        Expr::LitNumber(_)   => println!("{curr}LitNumber"),
+        Expr::LitString(_)   => println!("{curr}LitString"),
+        Expr::Ident(_)       => println!("{curr}Ident"),
+        Expr::Unary { op: _, rhs } => {
+            println!("{curr}Unary");
+            print_expr_tree(rhs, &child_prefix, true);
+        }
+        Expr::Binary { lhs, op: _, rhs } => {
+            println!("{curr}Binary");
+            print_expr_tree(lhs, &child_prefix, false);
+            print_expr_tree(rhs, &child_prefix, true);
+        }
+        // Si tienes más variantes (Call, Group, etc.), añádelas aquí.
+    }
+}
+
+// Dibujitos del árbol
+fn branch(prefix: &str, is_last: bool) -> (String, String) {
+    let curr = format!("{}{} ", prefix, if is_last { "└──" } else { "├──" });
+    let child = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
+    (curr, child)
+}
+*/
+
+// ===================== Tests basados en la 2da versión + extras =====================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn t(k: TokenKind, s: &str) -> Token {
+        Token { kind: k, lexeme: s.into(), line: 1, col: 1 }
+    }
+
+    #[test]
+    fn var_decl_and_expr() {
+        // atom x : atom_num = 5 + 3 * 2;
+        let toks = vec![
+            t(TokenKind::KwAtom, "atom"),
+            t(TokenKind::Ident, "x"),
+            t(TokenKind::Colon, ":"),
+            t(TokenKind::KwAtomNum, "atom_num"),
+            t(TokenKind::Assign, "="),
+            t(TokenKind::Number, "5"),
+            t(TokenKind::Plus, "+"),
+            t(TokenKind::Number, "3"),
+            t(TokenKind::Star, "*"),
+            t(TokenKind::Number, "2"),
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::EndOfFile, ""),
+        ];
+        let mut p = Parser::new(toks);
+        let prog = p.parse_program().unwrap();
+        assert!(matches!(prog[0], Stmt::VarDecl { .. }));
+    }
+
+    #[test]
+    fn assign_and_logic() {
+        // x = 1 + 2 * 3 == 7 and not (0);
+        let toks = vec![
+            t(TokenKind::Ident, "x"),
+            t(TokenKind::Assign, "="),
+            t(TokenKind::Number, "1"),
+            t(TokenKind::Plus, "+"),
+            t(TokenKind::Number, "2"),
+            t(TokenKind::Star, "*"),
+            t(TokenKind::Number, "3"),
+            t(TokenKind::Eq, "=="),
+            t(TokenKind::Number, "7"),
+            t(TokenKind::And, "and"),
+            t(TokenKind::Not, "not"),
+            t(TokenKind::LParen, "("),
+            t(TokenKind::Number, "0"),
+            t(TokenKind::RParen, ")"),
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::EndOfFile, ""),
+        ];
+        let mut p = Parser::new(toks);
+        let prog = p.parse_program().unwrap();
+        assert!(matches!(prog[0], Stmt::Assign { .. }));
+    }
+
+    #[test]
+    fn if_with_inotest_and_else() {
+        // itest (1) { emitln "a"; } inotest (0) { emitln "b"; } notest { emitln "c"; }
+        let toks = vec![
+            t(TokenKind::KwITest, "itest"),
+            t(TokenKind::LParen, "("),
+            t(TokenKind::Number, "1"),
+            t(TokenKind::RParen, ")"),
+            t(TokenKind::LBrace, "{"),
+            t(TokenKind::KwEmitln, "emitln"),
+            t(TokenKind::StringLit, "a"),
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::RBrace, "}"),
+            t(TokenKind::KwInotest, "inotest"),
+            t(TokenKind::LParen, "("),
+            t(TokenKind::Number, "0"),
+            t(TokenKind::RParen, ")"),
+            t(TokenKind::LBrace, "{"),
+            t(TokenKind::KwEmitln, "emitln"),
+            t(TokenKind::StringLit, "b"),
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::RBrace, "}"),
+            t(TokenKind::KwNotest, "notest"),
+            t(TokenKind::LBrace, "{"),
+            t(TokenKind::KwEmitln, "emitln"),
+            t(TokenKind::StringLit, "c"),
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::RBrace, "}"),
+            t(TokenKind::EndOfFile, ""),
+        ];
+        let mut p = Parser::new(toks);
+        let prog = p.parse_program().unwrap();
+        assert!(matches!(prog[0], Stmt::If { .. }));
+    }
+
+    #[test]
+    fn reaction_two_param_forms() {
+        // reaction f(a: atom_num, mass b) { emitln "ok"; }
+        let toks = vec![
+            t(TokenKind::KwReaction, "reaction"),
+            t(TokenKind::Ident, "f"),
+            t(TokenKind::LParen, "("),
+            t(TokenKind::Ident, "a"),
+            t(TokenKind::Colon, ":"),
+            t(TokenKind::KwAtomNum, "atom_num"),
+            t(TokenKind::Comma, ","),
+            t(TokenKind::KwMass, "mass"),
+            t(TokenKind::Ident, "b"),
+            t(TokenKind::RParen, ")"),
+            t(TokenKind::LBrace, "{"),
+            t(TokenKind::KwEmitln, "emitln"),
+            t(TokenKind::StringLit, "ok"),
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::RBrace, "}"),
+            t(TokenKind::EndOfFile, ""),
+        ];
+        let mut p = Parser::new(toks);
+        let prog = p.parse_program().unwrap();
+        assert!(matches!(prog[0], Stmt::ReactionDecl { .. }));
+    }
+
+    #[test]
+    fn custom_type_in_var_decl() {
+        // atom x : Vector3;
+        let toks = vec![
+            t(TokenKind::KwAtom, "atom"),
+            t(TokenKind::Ident, "x"),
+            t(TokenKind::Colon, ":"),
+            t(TokenKind::Ident, "Vector3"), // TypeName::Custom("Vector3")
+            t(TokenKind::Semi, ";"),
+            t(TokenKind::EndOfFile, ""),
+        ];
+        let mut p = Parser::new(toks);
+        let prog = p.parse_program().unwrap();
+        match &prog[0] {
+            Stmt::VarDecl { ty, .. } => match ty {
+                TypeName::Custom(s) => assert_eq!(s, "Vector3"),
+                _ => panic!("Se esperaba TypeName::Custom"),
+            },
+            _ => panic!("Se esperaba VarDecl"),
+        }
+    }
 }

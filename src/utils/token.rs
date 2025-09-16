@@ -2,30 +2,11 @@ use crate::utils::enums::TokenKind;
 use std::fmt;
 
 #[derive(Debug, Clone)]
-
 pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
     pub line: usize,
     pub col: usize,
-}
-
-impl Token {
-    pub fn get_kind(&self) -> TokenKind {
-        self.kind
-    }
-
-    pub fn get_lexeme(&self) -> &str {
-        &self.lexeme
-    }
-
-    pub fn get_line(&self) -> usize {
-        self.line
-    }
-
-    pub fn get_col(&self) -> usize {
-        self.col
-    }
 }
 
 impl fmt::Display for TokenKind {
