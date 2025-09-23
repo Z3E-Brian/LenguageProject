@@ -80,3 +80,20 @@ pub enum Expr {
     Unary { op: TokenKind, rhs: Box<Expr> },
     Binary { lhs: Box<Expr>, op: TokenKind, rhs: Box<Expr> },
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct Span {
+    pub line: usize,
+    pub col: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum BinOp {
+    Add, Sub, Mul, Div, And, Or, Eq, Ne, Lt, Le, Gt, Ge, Concat
+}
+
+#[derive(Debug, Clone)]
+pub enum UnOp {
+    Not, Neg
+}
+

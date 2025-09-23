@@ -17,7 +17,6 @@ pub struct ParseError {
     pub col: usize,
 }
 
-// Hace que los campos de Expr “se usen” al imprimir y evita warnings de dead_code
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -28,7 +27,6 @@ impl fmt::Display for Expr {
                 write!(f, "({:?} {})", op, rhs),
             Expr::Binary { lhs, op, rhs } =>
                 write!(f, "({} {:?} {})", lhs, op, rhs),
-            // Si tu Expr tiene más variantes, agrégalas aquí para un print legible
             _ => write!(f, "{:?}", self),
         }
     }
@@ -301,7 +299,7 @@ impl Parser {
             LParen    => {
                 let e = self.parse_expr(0)?;
                 self.consume(RParen, "Falta ')'")?;
-                Ok(e) // si quieres preservar, puedes usar Expr::Group(Box::new(e))
+                Ok(e) 
             }
             _ => Err(ParseError { message: format!("Expresión inválida. Encontré {:?}", t.kind), line: t.line, col: t.col })
         }
@@ -321,7 +319,6 @@ impl Parser {
 }
 
 // ====== Precedencias / binding powers ======
-// Mantiene el estilo claro (lbp, rbp) del primer parser
 fn infix_bp(op: &TokenKind) -> Option<(u8, u8)> {
     use TokenKind::*;
     match op {
@@ -338,7 +335,7 @@ fn infix_bp(op: &TokenKind) -> Option<(u8, u8)> {
 fn prefix_bp(op: &TokenKind) -> Option<u8> {
     use TokenKind::*;
     match op {
-        Minus | Not | Plus => Some(13), // admite +unario también
+        Minus | Not | Plus => Some(13), // admite +unario 
         _ => None,
     }
 }
