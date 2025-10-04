@@ -1,3 +1,4 @@
+use crate::utils::enums::{Expr, Stmt, TypeName, Block};
 use crate::{run_lexer, run_parser, run_semantics};
 use eframe::egui;
 use eframe::NativeOptions;
@@ -150,13 +151,118 @@ impl IDE {
     }
 
     fn ejecutar(&self) -> String {
-        // Reutilizar la función de compilación para validar el código
-        let compile_result = self.compilar();
-        if compile_result.starts_with("Error") {
-            return compile_result;
+        if self.code.trim().is_empty() {
+            return "Error: archivo vacío".into();
         }
-        // Simular ejecución (puedes personalizar esto según tu lenguaje)
-        "Ejecución completada. Salida simulada.".into()
+
+        // 1. Análisis léxico
+        let tokens = match run_lexer(&self.code) {
+            Ok(toks) => toks,
+            Err(e) => return format!("Error léxico: {}", e),
+        };
+
+        // 2. Análisis sintáctico
+        let ast = match run_parser(tokens) {
+            Ok(ast) => ast,
+            Err(e) => return format!("Error de parseo: {} @ {}:{}", e.message, e.line, e.col),
+        };
+
+        // 3. Análisis semántico
+        if let Err(errors) = run_semantics(&ast) {
+            let mut err_msg = String::from("Errores semánticos:\n");
+            for e in errors {
+                err_msg.push_str(&format!("- {} @ {}:{}\n", e.msg, e.line, e.col));
+            }
+            return err_msg;
+        }
+
+        // 4. Ejecución del programa
+        let mut output = String::new();
+        self.execute_program(&ast, &mut output);
+        
+        if output.is_empty() {
+            "Programa ejecutado sin salida.".into()
+        } else {
+            output
+        }
+    }
+
+    // Función auxiliar para ejecutar el programa
+    fn execute_program(&self, program: &crate::parser::Program, output: &mut String) {
+        use crate::utils::enums::Stmt;
+        
+        for stmt in program {
+            self.execute_stmt(stmt, output);
+        }
+    }
+
+    // Función auxiliar para ejecutar una declaración
+    fn execute_stmt(&self, stmt: &Stmt, output: &mut String) {
+        use crate::utils::enums::{Stmt, Expr};
+        
+        match stmt {
+            Stmt::EmitLn(expr) => {
+                if let Some(value) = self.evaluate_expr(expr) {
+                    output.push_str(&value);
+                    output.push('\n');
+                }
+            }
+            Stmt::Emit(expr) => {
+                if let Some(value) = self.evaluate_expr(expr) {
+                    output.push_str(&value);
+                }
+            }
+            Stmt::Block(block) => {
+                for s in block {
+                    self.execute_stmt(s, output);
+                }
+            }
+            Stmt::ReactionDecl { body, .. } => {
+                // Ejecutar el cuerpo de la función
+                for s in body {
+                    self.execute_stmt(s, output);
+                }
+            }
+            Stmt::If { arms, else_block, .. } => {
+                // Por simplicidad, ejecutamos el primer brazo si existe
+                if let Some((_, then_block)) = arms.first() {
+                    for s in then_block {
+                        self.execute_stmt(s, output);
+                    }
+                } else if let Some(else_blk) = else_block {
+                    for s in else_blk {
+                        self.execute_stmt(s, output);
+                    }
+                }
+            }
+            _ => {
+                // Para otras declaraciones, no hacemos nada por ahora
+            }
+        }
+    }
+
+    // Función auxiliar para evaluar expresiones
+    fn evaluate_expr(&self, expr: &Expr) -> Option<String> {
+        use crate::utils::enums::Expr;
+        
+        match expr {
+            Expr::LitString(s) => Some(s.clone()),
+            Expr::LitNumber(n) => Some(n.clone()),
+            Expr::Ident(name) => Some(format!("{}", name)),
+            Expr::Binary { op, lhs, rhs } => {
+                let left = self.evaluate_expr(lhs)?;
+                let right = self.evaluate_expr(rhs)?;
+                
+                // Operación simple de concatenación para strings
+                match op {
+                    crate::utils::enums::TokenKind::Plus => {
+                        Some(format!("{}{}", left, right))
+                    }
+                    _ => Some(format!("{} {} {}", left, op, right))
+                }
+            }
+            _ => None,
+        }
     }
 }
 
