@@ -1,20 +1,10 @@
 use std::collections::HashMap;
 
-use crate::utils::enums::{Expr, Stmt, TypeName, Block};
+use crate::utils::enums::{Expr, Stmt, TypeName, Block, Ty};
 use crate::utils::enums::TokenKind;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Ty {
-    AtomNum,    // int
-    Mass,       // float
-    Polarized,  // bool
-    Formula,    // string
-    VoidState,  // void/null
-    Unknown,    // tipo desconocido (para no abortar al 1er error)
-    Function(Vec<Ty>, Box<Ty>), // params, retorno
-}
 
-// ---------------- Símbolos / Ámbitos / Errores ---------------------
+// ---------------- Símbolos / Ámbitos / Errores ---------------- //
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub name: String,
@@ -29,7 +19,10 @@ pub struct SemError {
     pub line: usize,
     pub col: usize,
 }
+// ---------------- Simbolos / Ámbitos / Errores ---------------- //
 
+
+// -- Pila de ambitos (para variables locales y globales) y guardado de errores -- //
 type Scope = HashMap<String, Symbol>;
 
 pub struct SemCtx {
@@ -47,10 +40,9 @@ impl SemCtx {
     fn pop_scope(&mut self) { self.scopes.pop(); }
     
     fn declare(&mut self, sym: Symbol) {
-        // Si quieres prohibir shadowing, busca en toda la pila.
         let top = self.scopes.last_mut().unwrap();
         if top.contains_key(&sym.name) {
-            self.error(format!("Símbolo duplicado: {}", sym.name), 0, 0); // TODO: agregar span
+            self.error(format!("Símbolo duplicado: {}", sym.name), 0, 0); // TODO: agregar span al parser
         } else {
             top.insert(sym.name.clone(), sym);
         }
@@ -68,11 +60,10 @@ impl SemCtx {
     }
 }
 
+
 // ------------------ Entorno por función (reaction) -----------------
 #[derive(Debug, Clone)]
-struct FnEnv {
-    ret: Ty, // tipo de retorno esperado
-}
+struct FnEnv {ret: Ty}// tipo de retorno esperado
 
 // ---------------------- Pase semántico -----------------------------
 pub struct SemanticPass<'a> {
@@ -85,8 +76,8 @@ impl<'a> SemanticPass<'a> {
         Self { ctx, fn_stack: vec![] }
     }
 
+    // -- Encargado de crear el contexto y chequear todo el programa -- //
     pub fn check_program(&mut self, program: &Block) {
-        // 1) Pre-declarar reactions (permite llamadas antes de la definición)
         for stmt in program {
             if let Stmt::ReactionDecl { name, params, .. } = stmt {
                 let param_tys = params.iter().map(|(_, ty)| self.map_typename_to_ty(ty)).collect();
@@ -100,12 +91,12 @@ impl<'a> SemanticPass<'a> {
             }
         }
 
-        // 2) Chequear todo el programa
         for stmt in program {
             self.check_stmt(stmt);
         }
     }
 
+    // -- Plato principal: chequea cada statement y expresión -- //
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
             // atom x : T = expr?;
@@ -174,11 +165,12 @@ impl<'a> SemanticPass<'a> {
                 }
             }
 
-            // emit/emitln expr;
-            Stmt::EmitLn(expr) | Stmt::Emit(expr) => {
-                let ety = self.check_expr(expr);
-                if ety == Ty::Unknown || ety != Ty::Formula {
-                    self.ctx.error("emit/emitln requiere formula (string)", 0, 0);
+            // emit/emitln (args...);
+            Stmt::EmitLn(args) | Stmt::Emit(args) => {
+                // Verificamos que cada argumento sea válido
+                // Los argumentos pueden ser de cualquier tipo ya que se convertirán a string
+                for arg in args {
+                    self.check_expr(arg);
                 }
             }
 
@@ -236,7 +228,7 @@ impl<'a> SemanticPass<'a> {
                 self.check_expr(expr); // Solo verificar la expresión
             }
 
-            // Agrega aquí otros tipos de stmt según tu AST...
+            // TODO: agregar fors
         }
     }
 

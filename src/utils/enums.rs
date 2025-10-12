@@ -66,8 +66,8 @@ pub enum Stmt {
     Assign { name: String, value: Expr },
     If { arms: Vec<(Expr, Block)>, else_block: Option<Block> },
     ExprStmt(Expr),
-    EmitLn(Expr),
-    Emit(Expr),
+    EmitLn(Vec<Expr>),  // Cambiado para aceptar múltiples argumentos
+    Emit(Vec<Expr>),    // Cambiado para aceptar múltiples argumentos
     ReactionDecl { name: String, params: Vec<(String, TypeName)>, body: Block },
     Block(Block),
 }
@@ -97,3 +97,65 @@ pub enum UnOp {
     Not, Neg
 }
 
+
+#[derive(Debug, Clone)]
+pub enum Instruction {
+    // Manejo de valores
+    LoadConst(Value),           // Cargar constante al stack
+    LoadVar(String),            // Cargar variable al stack  
+    StoreVar(String),           // Guardar del stack a variable
+    
+    // Operaciones aritméticas
+    Add, Sub, Mul, Div, Mod,    // Operaciones binarias
+    Neg, Not,                   // Operaciones unarias
+    
+    // Operaciones de comparación
+    Equal, NotEqual,            // == !=
+    Less, Greater,              // < >
+    LessEqual, GreaterEqual,    // <= >=
+    And, Or,                    // && ||
+    
+    // Control de flujo
+    Jump(usize),                // Salto incondicional
+    JumpIfFalse(usize),         // Salto condicional
+    JumpIfTrue(usize),          // Salto condicional
+    Label(String),              // Etiqueta para saltos
+    
+    // Funciones
+    Call(String, usize),        // Llamar función (nombre, num_args)
+    Return,                     // Retornar de función
+    PushScope,                  // Crear nuevo scope
+    PopScope,                   // Eliminar scope actual
+    
+    // I/O
+    EmitLn(usize),              // Imprimir con salto (num_args)
+    Emit(usize),                // Imprimir sin salto (num_args)
+    
+    // Control de bucles (para futuro)
+    Break,                      // Salir del bucle
+    Continue,                   // Siguiente iteración
+    
+    // Utilidades
+    Pop,                        // Eliminar valor del stack
+    Dup,                        // Duplicar valor en stack
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Number(f64),                // atom_num, mass
+    String(String),             // formula
+    Bool(bool),                 // polarized
+    Char(char),                 // symbol (futuro)
+    Void,                       // VoidState
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Ty {
+    AtomNum,    // int
+    Mass,       // float
+    Polarized,  // bool
+    Formula,    // string
+    VoidState,  // void/null
+    Unknown,    // tipo desconocido (para no abortar al 1er error)
+    Function(Vec<Ty>, Box<Ty>), // params, retorno
+}
