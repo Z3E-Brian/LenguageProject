@@ -69,11 +69,18 @@ struct FnEnv {ret: Ty}// tipo de retorno esperado
 pub struct SemanticPass<'a> {
     ctx: &'a mut SemCtx,
     fn_stack: Vec<FnEnv>,
+    loop_nesting_level: usize,  // Nivel de anidamiento de bucles
 }
 
 impl<'a> SemanticPass<'a> {
     pub fn new(ctx: &'a mut SemCtx) -> Self {
-        Self { ctx, fn_stack: vec![] }
+        Self { ctx, fn_stack: vec![], loop_nesting_level: 0 }
+    }
+
+    // 🔧 HELPER: Obtener nombre de variable para nivel de bucle
+    fn get_loop_variable_name(level: usize) -> String {
+        // Generar variables loop_1, loop_2, loop_3, ... (1-indexed desde exterior)
+        format!("loop_{}", level + 1)
     }
 
     // -- Encargado de crear el contexto y chequear todo el programa -- //
@@ -228,7 +235,53 @@ impl<'a> SemanticPass<'a> {
                 self.check_expr(expr); // Solo verificar la expresión
             }
 
-            // TODO: agregar fors
+            // chain N {} o chain N to M {}
+            Stmt::Chain { start, end, body } => {
+                // Verificar que los valores sean válidos si están presentes
+                if let Some(s) = start {
+                    if *s < 0 {
+                        self.ctx.error(
+                            "El valor inicial del chain debe ser positivo".to_string(),
+                            0, 0
+                        );
+                    }
+                }
+                
+                if let Some(e) = end {
+                    if *e < 0 {
+                        self.ctx.error(
+                            "El valor final del chain debe ser positivo".to_string(),
+                            0, 0
+                        );
+                    }
+                    
+                    // No hay restricción en la relación entre start y end
+                    // Los bucles pueden ser ascendentes (2 to 5) o descendentes (5 to 2)
+                }
+                
+                // Verificar el cuerpo del bucle en un nuevo scope
+                self.ctx.push_scope();
+                
+                // 🎯 AGREGAR TODAS LAS VARIABLES loop_N DISPONIBLES
+                // Agregar variables de todos los bucles padre (loop_1, loop_2, ...)
+                for level in 0..=self.loop_nesting_level {
+                    let loop_var_name = Self::get_loop_variable_name(level);
+                    let loop_var = Symbol {
+                        name: loop_var_name,
+                        ty: Ty::AtomNum,
+                        is_const: true,  // Las variables de bucle son de solo lectura
+                        mutable: false,
+                    };
+                    self.ctx.declare(loop_var);
+                }
+                
+                // Incrementar nivel para bucles anidados
+                self.loop_nesting_level += 1;
+                self.check_block(body);
+                self.loop_nesting_level -= 1;
+                
+                self.ctx.pop_scope();
+            }
         }
     }
 

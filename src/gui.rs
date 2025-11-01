@@ -18,6 +18,7 @@ pub enum SnippetTab {
     #[default]
     Declarations,
     Control,
+    Loops,
     Functions,
     Common,
 }
@@ -202,6 +203,7 @@ impl IDE {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.selected_tab, SnippetTab::Declarations, "📝 Declaraciones");
             ui.selectable_value(&mut self.selected_tab, SnippetTab::Control, "🔀 Control");
+            ui.selectable_value(&mut self.selected_tab, SnippetTab::Loops, "🔄 Bucles");
             ui.selectable_value(&mut self.selected_tab, SnippetTab::Functions, "⚙️ Funciones");
             ui.selectable_value(&mut self.selected_tab, SnippetTab::Common, "🔧 Común");
         });
@@ -211,6 +213,7 @@ impl IDE {
         match self.selected_tab {
             SnippetTab::Declarations => self.show_declarations_snippets(ui),
             SnippetTab::Control => self.show_control_snippets(ui),
+            SnippetTab::Loops => self.show_loops_snippets(ui),
             SnippetTab::Functions => self.show_functions_snippets(ui),
             SnippetTab::Common => self.show_common_snippets(ui),
         }
@@ -292,6 +295,92 @@ impl IDE {
             }
             if ui.button("🧮 Emit con Operación").clicked() {
                 self.insert_snippet("emitln(\"Resultado: \", a + b);");
+            }
+        });
+    }
+    
+    fn show_loops_snippets(&mut self, ui: &mut egui::Ui) {
+        ui.heading("🔄 Bucles Chain");
+        
+        ui.label("📋 Bucles Básicos:");
+        ui.horizontal(|ui| {
+            if ui.button("🔄 Bucle Simple").clicked() {
+                self.insert_snippet("chain 3 {\n    emit(\"Iteración: \", i, \"\\n\");\n}");
+            }
+            if ui.button("⬆️ Bucle Ascendente").clicked() {
+                self.insert_snippet("chain 1 to 10 {\n    emit(\"Número: \", i, \"\\n\");\n}");
+            }
+        });
+        
+        ui.horizontal(|ui| {
+            if ui.button("⬇️ Bucle Descendente").clicked() {
+                self.insert_snippet("chain 10 to 1 {\n    emit(\"Countdown: \", i, \"\\n\");\n}");
+            }
+            if ui.button("🎯 Bucle Personalizado").clicked() {
+                self.insert_snippet("chain 5 to 15 {\n    // Usar variable 'i' aquí\n    emit(\"Valor actual: \", i, \"\\n\");\n}");
+            }
+        });
+        
+        ui.separator();
+        ui.label("🧮 Bucles con Matemáticas:");
+        
+        ui.horizontal(|ui| {
+            if ui.button("✖️ Tabla de Multiplicar").clicked() {
+                self.insert_snippet("chain 1 to 10 {\n    atom resultado : atom_num = 5 * i;\n    emit(\"5 x \", i, \" = \", resultado, \"\\n\");\n}");
+            }
+            if ui.button("🔢 Potencias").clicked() {
+                self.insert_snippet("chain 1 to 5 {\n    atom cuadrado : atom_num = i * i;\n    atom cubo : atom_num = i * i * i;\n    emit(\"i=\", i, \" i²=\", cuadrado, \" i³=\", cubo, \"\\n\");\n}");
+            }
+        });
+        
+        ui.horizontal(|ui| {
+            if ui.button("➕ Suma Acumulativa").clicked() {
+                self.insert_snippet("atom suma : atom_num = 0;\nchain 1 to 100 {\n    suma = suma + i;\n    emit(\"Suma hasta \", i, \": \", suma, \"\\n\");\n}\nemit(\"Suma total: \", suma, \"\\n\");");
+            }
+            if ui.button("📊 Factorial").clicked() {
+                self.insert_snippet("atom factorial : atom_num = 1;\nchain 1 to 5 {\n    factorial = factorial * i;\n    emit(\"Factorial de \", i, \": \", factorial, \"\\n\");\n}");
+            }
+        });
+        
+        ui.separator();
+        ui.label("🎯 Bucles con Condicionales:");
+        
+        ui.horizontal(|ui| {
+            if ui.button("🔢 Par/Impar").clicked() {
+                self.insert_snippet("chain 1 to 20 {\n    itest (i % 2 == 0) {\n        emit(i, \" es par\\n\");\n    } notest {\n        emit(i, \" es impar\\n\");\n    }\n}");
+            }
+            if ui.button("🔍 Búsqueda").clicked() {
+                self.insert_snippet("atom encontrado : polarized = false;\nchain 1 to 100 {\n    itest (i == 42) {\n        emit(\"¡Encontrado en posición: \", i, \"!\\n\");\n        encontrado = true;\n    }\n}");
+            }
+        });
+        
+        ui.horizontal(|ui| {
+            if ui.button("📈 Números Primos").clicked() {
+                self.insert_snippet("chain 2 to 50 {\n    atom es_primo : polarized = true;\n    // Verificar si i es primo\n    itest (i > 2) {\n        atom divisor : atom_num = 2;\n        // Simplificado: verificar solo algunos divisores\n        itest (i % divisor == 0) {\n            es_primo = false;\n        }\n    }\n    itest (es_primo) {\n        emit(i, \" es primo\\n\");\n    }\n}");
+            }
+            if ui.button("🎲 Filtro de Rango").clicked() {
+                self.insert_snippet("chain 1 to 100 {\n    itest (i >= 10 && i <= 20) {\n        emit(\"En rango: \", i, \"\\n\");\n    } inotest (i < 10) {\n        emit(\"Muy pequeño: \", i, \"\\n\");\n    } notest {\n        emit(\"Muy grande: \", i, \"\\n\");\n    }\n}");
+            }
+        });
+        
+        ui.separator();
+        ui.label("🎨 Bucles de Patrones:");
+        
+        ui.horizontal(|ui| {
+            if ui.button("📐 Triángulo").clicked() {
+                self.insert_snippet("chain 1 to 5 {\n    chain 1 to i {\n        emit(\"* \");\n    }\n    emit(\"\\n\");\n}");
+            }
+            if ui.button("🔴 Círculos").clicked() {
+                self.insert_snippet("chain 1 to 3 {\n    emit(\"Círculo \", i, \": \");\n    chain 1 to i {\n        emit(\"O \");\n    }\n    emit(\"\\n\");\n}");
+            }
+        });
+        
+        ui.horizontal(|ui| {
+            if ui.button("📏 Tabla Formateada").clicked() {
+                self.insert_snippet("emit(\"Tabla de Valores:\\n\");\nemit(\"i\\ti²\\ti³\\n\");\nemit(\"---\\t---\\t---\\n\");\nchain 1 to 10 {\n    atom cuadrado : atom_num = i * i;\n    atom cubo : atom_num = i * i * i;\n    emit(i, \"\\t\", cuadrado, \"\\t\", cubo, \"\\n\");\n}");
+            }
+            if ui.button("🎯 Programa Completo").clicked() {
+                self.insert_snippet("!! Programa de demostración de bucles\nemit(\"=== DEMOSTRACIÓN DE BUCLES CHAIN ===\\n\\n\");\n\n!! 1. Bucle simple\nemit(\"1. Conteo del 0 al 4:\\n\");\nchain 5 {\n    emit(\"- Iteración \", i, \"\\n\");\n}\n\n!! 2. Bucle con rango\nemit(\"\\n2. Números del 10 al 15:\\n\");\nchain 10 to 15 {\n    emit(\"- Número: \", i, \"\\n\");\n}\n\n!! 3. Bucle descendente\nemit(\"\\n3. Countdown del 5 al 1:\\n\");\nchain 5 to 1 {\n    emit(\"- \", i, \"...\\n\");\n}\n\nemit(\"\\n¡Programa completado!\\n\");");
             }
         });
     }

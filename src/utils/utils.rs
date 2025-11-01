@@ -12,6 +12,8 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "emitln" => KwEmitln,
         "emit" => KwEmit,
         "synthesize" => KwSynthesize,
+        "chain" => KwChain,
+        "to" => KwTo,
         // declaración
         "atom" => KwAtom,
         "molecule" => KwMolecule,

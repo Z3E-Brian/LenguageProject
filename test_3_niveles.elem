@@ -1,0 +1,12 @@
+!! Test 3 niveles de anidacion
+chain 2 {
+    emit("Nivel 1 - loop_1 = ", loop_1, "\n");
+    chain 2 {
+        emit("  Nivel 2 - loop_1 = ", loop_1, ", loop_2 = ", loop_2, "\n");
+        chain 2 {
+            emit("    Nivel 3 - loop_1 = ", loop_1, ", loop_2 = ", loop_2, ", loop_3 = ", loop_3, "\n");
+        }
+    }
+}
+
+emit("=== Fin 3 niveles ===\n");

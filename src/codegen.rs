@@ -105,6 +105,10 @@ impl CodeGenerator {
                 self.emit(Instruction::Pop); // Descartar resultado
                 Ok(())
             }
+            
+            Stmt::Chain { start, end, body } => {
+                self.generate_chain(start, end, body)
+            }
         }
     }
     
@@ -213,6 +217,51 @@ impl CodeGenerator {
         for jump_pos in jump_to_end_labels {
             if let Instruction::Jump(target) = &mut self.instructions[jump_pos] {
                 *target = end_pos;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn generate_chain(&mut self, start: &Option<i32>, end: &Option<i32>, body: &[Stmt]) -> Result<(), String> {
+        match (start, end) {
+            // chain N {} - ejecuta N veces
+            (Some(count), None) => {
+                if *count <= 0 {
+                    return Ok(()); // No ejecutar si count <= 0
+                }
+                
+                // 🆕 Iniciar captura del bucle: de 0 a count-1
+                self.emit(Instruction::StartLoopCapture(0, *count - 1, true));
+                
+                // Generar código del cuerpo (se capturará en el buffer)
+                for stmt in body {
+                    self.generate_stmt(stmt)?;
+                }
+                
+                // Terminar captura y empezar ejecución cíclica
+                self.emit(Instruction::EndLoopCapture);
+            }
+            
+            // chain N to M {} - ejecuta desde N hasta M 
+            (Some(start_val), Some(end_val)) => {
+                // Determinar si es ascendente o descendente
+                let ascending = *start_val < *end_val;
+                
+                // 🆕 Iniciar captura del bucle
+                self.emit(Instruction::StartLoopCapture(*start_val, *end_val, ascending));
+                
+                // Generar código del cuerpo
+                for stmt in body {
+                    self.generate_stmt(stmt)?;
+                }
+                
+                // Terminar captura y empezar ejecución cíclica
+                self.emit(Instruction::EndLoopCapture);
+            }
+            
+            _ => {
+                return Err("Chain inválido: debe especificar al menos un valor inicial".to_string());
             }
         }
         

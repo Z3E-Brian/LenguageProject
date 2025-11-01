@@ -9,6 +9,8 @@ pub enum TokenKind {
     KwEmitln,
     KwEmit,
     KwSynthesize,
+    KwChain,
+    KwTo,
     // decl
     KwAtom,
     KwMolecule,
@@ -70,6 +72,7 @@ pub enum Stmt {
     Emit(Vec<Expr>),    // Cambiado para aceptar múltiples argumentos
     ReactionDecl { name: String, params: Vec<(String, TypeName)>, body: Block },
     Block(Block),
+    Chain { start: Option<i32>, end: Option<i32>, body: Block },
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +137,10 @@ pub enum Instruction {
     // Control de bucles (para futuro)
     Break,                      // Salir del bucle
     Continue,                   // Siguiente iteración
+    
+    // 🆕 INSTRUCCIONES PARA STACK AUXILIAR DE BUCLES
+    StartLoopCapture(i32, i32, bool), // (inicial, límite, ascendente) - Empezar captura
+    EndLoopCapture,             // Terminar captura y empezar ejecución cíclica
     
     // Utilidades
     Pop,                        // Eliminar valor del stack

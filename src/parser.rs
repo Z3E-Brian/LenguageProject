@@ -140,6 +140,7 @@ impl Parser {
             KwEmitln => self.parse_emit_stmt(true),
             KwEmit => self.parse_emit_stmt(false),
             KwReaction => self.parse_reaction_decl(),
+            KwChain => self.parse_chain_stmt(),
             LBrace => self.parse_block().map(Stmt::Block),
             Ident => {
                 if let Ok(stmt) = self.try_parse_assign_stmt() {
@@ -364,6 +365,40 @@ impl Parser {
             }
         };
         Ok(ty)
+    }
+
+    fn parse_chain_stmt(&mut self) -> Result<Stmt, ParseError> {
+        // Parsea "chain N { ... }" o "chain N to M { ... }"
+        self.consume(TokenKind::KwChain, "Se esperaba 'chain'")?;
+        
+        // Parsear el número inicial
+        let start_token = self.consume(TokenKind::Number, "Se esperaba un número después de 'chain'")?;
+        let start = start_token.lexeme.parse::<i32>().map_err(|_| ParseError {
+            message: "Número inválido para chain".to_string(),
+            line: start_token.line,
+            col: start_token.col,
+        })?;
+        
+        let end = if self.match_next(&[TokenKind::KwTo]) {
+            // Es un ciclo "chain N to M"
+            let end_token = self.consume(TokenKind::Number, "Se esperaba un número después de 'to'")?;
+            Some(end_token.lexeme.parse::<i32>().map_err(|_| ParseError {
+                message: "Número inválido para chain end".to_string(),
+                line: end_token.line,
+                col: end_token.col,
+            })?)
+        } else {
+            // Es un ciclo "chain N"
+            None
+        };
+        
+        let body = self.parse_block()?;
+        
+        Ok(Stmt::Chain {
+            start: Some(start),
+            end,
+            body,
+        })
     }
 
     // ====== EXPRESIONES (Pratt) ======

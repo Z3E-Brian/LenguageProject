@@ -21,6 +21,8 @@ impl fmt::Display for TokenKind {
             KwEmitln => "KW_EMITLN",
             KwEmit => "KW_EMIT",
             KwSynthesize => "KW_SYNTHESIZE",
+            KwChain => "KW_CHAIN",
+            KwTo => "KW_TO",
             KwAtom => "KW_ATOM",
             KwMolecule => "KW_MOLECULE",
             KwReaction => "KW_REACTION",
