@@ -83,6 +83,31 @@ impl<'a> SemanticPass<'a> {
         format!("loop_{}", level + 1)
     }
 
+    fn enter_loop_scope(&mut self) {
+        self.ctx.push_scope();
+
+        // Declarar todas las variables de bucles padre + la del bucle actual
+        // Si estábamos en nivel k (0 para “ningún bucle”), declaramos loop_1..loop_{k+1}
+        for level in 0..=self.loop_nesting_level {
+            let loop_var_name = Self::get_loop_variable_name(level);
+            self.ctx.declare(Symbol {
+                name: loop_var_name,
+                ty: Ty::AtomNum,
+                is_const: true,
+                mutable: false,
+            });
+        }
+
+        // Ahora sí, aumentamos el nivel (para que los bucles hijos vean una más)
+        self.loop_nesting_level += 1;
+    }
+
+    fn exit_loop_scope(&mut self) {
+        // Decrementar nivel y cerrar el scope del bucle
+        self.loop_nesting_level = self.loop_nesting_level.saturating_sub(1);
+        self.ctx.pop_scope();
+    }
+
     // -- Encargado de crear el contexto y chequear todo el programa -- //
     pub fn check_program(&mut self, program: &Block) {
         for stmt in program {
@@ -107,6 +132,40 @@ impl<'a> SemanticPass<'a> {
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
             // atom x : T = expr?;
+
+            Stmt::Chain { start, end, body } => {
+                match (start, end) {
+                    // ➤ chain N {}
+                    (Some(n), None) => {
+                        if *n < 0 {
+                            self.ctx.error("El conteo de chain debe ser ≥ 0", 0, 0);
+                            return;
+                        }
+                        // N==0: no ejecutará; igual revisamos el cuerpo para tipos/símbolos
+                        self.enter_loop_scope();
+                        self.check_block(body);
+                        self.exit_loop_scope();
+                    }
+
+                    // ➤ chain A to B {}
+                    (Some(_a), Some(_b)) => {
+                        // No restringimos signo ni orden: A..=B puede ser asc/desc/igual
+                        // Revisamos el cuerpo en un scope de bucle
+                        self.enter_loop_scope();
+                        self.check_block(body);
+                        self.exit_loop_scope();
+                    }
+
+                    // ➤ inválido (p.ej. None/Some o None/None)
+                    _ => {
+                        self.ctx.error(
+                            "Chain inválido: use `chain N {}` o `chain A to B {}`",
+                            0, 0
+                        );
+                    }
+                }
+            }
+
             Stmt::VarDecl { name, ty, init, .. } => {
                 let init_ty = if let Some(e) = init { 
                     self.check_expr(e) 
