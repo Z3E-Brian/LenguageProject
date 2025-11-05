@@ -9,8 +9,6 @@ pub struct Executor {
     output: String,                         // Salida del programa
     pc: usize,                              // Program counter (instruction pointer)
     call_stack: Vec<usize>,                 // Pila de llamadas (para funciones)
-    
-    // 🆕 SISTEMA DINÁMICO DE BUCLES ANIDADOS (EJECUCIÓN INMEDIATA)
     loop_counter_stack: Vec<i32>,               // Stack de contadores [exterior -> interior]
 }
 
@@ -40,8 +38,6 @@ impl Executor {
             output: String::new(),
             pc: 0,
             call_stack: Vec::new(),
-            
-            // 🆕 INICIALIZACIÓN DEL SISTEMA DINÁMICO DE BUCLES
             loop_counter_stack: Vec::new(),
         }
     }
@@ -54,14 +50,12 @@ impl Executor {
         Ok(self.output.clone())
     }
 
-    // 🎯 NUEVA FUNCIÓN: Ejecutar instrucciones de forma inmediata (como C++)
     fn execute_instructions(&mut self, instructions: &[Instruction]) -> Result<(), ExecutionError> {
         while self.pc < instructions.len() {
             let current_instruction = &instructions[self.pc];
             
             match current_instruction {
                 Instruction::StartLoopCapture(initial, limit, ascending) => {
-                    // 🚀 EJECUTAR BUCLE INMEDIATAMENTE 
                     self.execute_loop_immediately_with_instructions(*initial, *limit, *ascending, instructions)?;
                     // El PC ya fue actualizado dentro de la función del bucle
                 }
@@ -354,7 +348,6 @@ impl Executor {
                 }
             }
 
-            // ===== 🎯 BUCLES CON EJECUCIÓN INMEDIATA (COMO C++) =====
             Instruction::StartLoopCapture(_, _, _) => {
                 // StartLoopCapture se maneja en execute_instructions, no aquí
                 Err(ExecutionError {
@@ -369,11 +362,19 @@ impl Executor {
                 Ok(true)
             }
 
-            // ===== NO IMPLEMENTADAS AUN =====
-            Instruction::Call(_, _) => Err(ExecutionError {
-                message: "Function calls not implemented yet".to_string(),
-                instruction_index: self.pc,
-            }),
+            // ===== LLAMADAS A FUNCIONES Y BUILTINS =====
+            Instruction::Call(name, argc) => {
+                // Manejar funciones builtin para vectores
+                if name.starts_with("__vec_") {
+                    self.execute_vector_builtin(name, *argc)?;
+                    Ok(true)
+                } else {
+                    Err(ExecutionError {
+                        message: format!("Function '{}' not implemented yet", name),
+                        instruction_index: self.pc,
+                    })
+                }
+            }
 
             Instruction::Return => {
                 // Por ahora, simplemente terminar ejecución
@@ -457,7 +458,6 @@ impl Executor {
         }
     }
 
-    // 🎯 CONFIGURAR VARIABLES loop_N AUTOMÁTICAS
     fn setup_loop_variables(&mut self) {
         if let Some(current_scope) = self.variables.last_mut() {
             // Limpiar variables de bucle anteriores
@@ -475,8 +475,6 @@ impl Executor {
 
     // 🎯 EJECUTAR BUCLE INMEDIATAMENTE CON ACCESO A INSTRUCCIONES (COMO C++)
     fn execute_loop_immediately_with_instructions(&mut self, initial: i32, limit: i32, ascending: bool, instructions: &[Instruction]) -> Result<(), ExecutionError> {
-        
-        // 🔍 ENCONTRAR EL RANGO DEL CUERPO DEL BUCLE (StartLoopCapture -> EndLoopCapture)
         let start_pc = self.pc; // StartLoopCapture actual
         let mut end_pc = start_pc + 1;
         let mut nested_count = 0;
@@ -500,8 +498,6 @@ impl Executor {
         }
         
         let body_instructions = &instructions[start_pc + 1..end_pc]; // Cuerpo del bucle
-        
-        // 🔄 BUCLE PRINCIPAL: Iterar desde initial hasta limit
         let mut counter = initial;
         
         while {
@@ -512,13 +508,10 @@ impl Executor {
                 counter >= limit
             }
         } {
-            
-            // 📍 CONFIGURAR CONTEXTO PARA ESTA ITERACIÓN
             self.loop_counter_stack.push(counter);
             self.variables.push(HashMap::new());
             self.setup_loop_variables();
             
-            // 🚀 EJECUTAR CUERPO DEL BUCLE
             let saved_pc = self.pc;
             self.pc = 0; // Reset PC para ejecutar el cuerpo
             
@@ -527,7 +520,6 @@ impl Executor {
             
             self.pc = saved_pc; // Restaurar PC
             
-            // 🧹 LIMPIAR DESPUÉS DE LA ITERACIÓN
             self.loop_counter_stack.pop();
             if self.variables.len() > 1 {
                 self.variables.pop();
@@ -547,7 +539,6 @@ impl Executor {
         Ok(())
     }
     
-    // 🎯 EJECUTAR UN SLICE DE INSTRUCCIONES (CUERPO DEL BUCLE)
     fn execute_body_slice(&mut self, body_instructions: &[Instruction]) -> Result<(), ExecutionError> {
         let saved_pc = self.pc;
         self.pc = 0;
@@ -583,7 +574,6 @@ impl Executor {
         Ok(())
     }
     
-    // 🎯 MANEJAR BUCLE ANIDADO (SIMPLIFICADO)
     fn execute_nested_loop(&mut self, initial: i32, limit: i32, ascending: bool, parent_body: &[Instruction]) -> Result<(), ExecutionError> {
         // Por ahora, implementación simple que encuentra el cuerpo del bucle anidado
         let start_pc = self.pc;
@@ -647,6 +637,207 @@ impl Executor {
         self.pc = end_pc;
         
         Ok(())
+    }
+
+    fn execute_vector_builtin(&mut self, name: &str, argc: usize) -> Result<(), ExecutionError> {
+        use crate::utils::enums::Ty;
+        
+        match name {
+            // __vec_from(elem1, elem2, ..., elemN) -> Vector
+            "__vec_from" => {
+                if argc == 0 {
+                    // Vector vacío
+                    self.stack.push(Value::Vector {
+                        elem: Ty::Unknown,
+                        data: Vec::new(),
+                    });
+                    return Ok(());
+                }
+                
+                // Recolectar elementos del stack
+                let mut elements = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    if let Some(value) = self.stack.pop() {
+                        elements.push(value);
+                    } else {
+                        return Err(ExecutionError {
+                            message: format!("Stack underflow in __vec_from (expected {} elements)", argc),
+                            instruction_index: self.pc,
+                        });
+                    }
+                }
+                
+                // Revertir orden (estaban en orden inverso en el stack)
+                elements.reverse();
+                
+                // Inferir tipo del primer elemento
+                let elem_type = if let Some(first) = elements.first() {
+                    match first {
+                        Value::Number(_) => Ty::AtomNum,
+                        Value::String(_) => Ty::Formula,
+                        Value::Bool(_) => Ty::Polarized,
+                        Value::Char(_) => Ty::Formula,
+                        Value::Void => Ty::VoidState,
+                        Value::Vector { elem, .. } => elem.clone(),
+                    }
+                } else {
+                    Ty::Unknown
+                };
+                
+                // Crear vector
+                self.stack.push(Value::Vector {
+                    elem: elem_type,
+                    data: elements,
+                });
+                
+                Ok(())
+            }
+            
+            // __vec_get(vector, index) -> elemento
+            "__vec_get" => {
+                if argc != 2 {
+                    return Err(ExecutionError {
+                        message: format!("__vec_get expects 2 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let index = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_get (index)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let vector = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_get (vector)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match (vector, index) {
+                    (Value::Vector { data, .. }, Value::Number(idx)) => {
+                        let idx = idx as usize;
+                        if idx >= data.len() {
+                            return Err(ExecutionError {
+                                message: format!("Index {} out of bounds for vector of length {}", idx, data.len()),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        self.stack.push(data[idx].clone());
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid arguments for __vec_get (expected Vector and Number)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __vec_len(vector) -> número
+            "__vec_len" => {
+                if argc != 1 {
+                    return Err(ExecutionError {
+                        message: format!("__vec_len expects 1 argument, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let vector = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_len".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match vector {
+                    Value::Vector { data, .. } => {
+                        self.stack.push(Value::Number(data.len() as f64));
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid argument for __vec_len (expected Vector)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __vec_push(vector, elemento) -> void
+            "__vec_push" => {
+                if argc != 2 {
+                    return Err(ExecutionError {
+                        message: format!("__vec_push expects 2 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let element = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_push (element)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let mut vector = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_push (vector)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match &mut vector {
+                    Value::Vector { data, .. } => {
+                        data.push(element);
+                        self.stack.push(vector); // Devolver vector modificado
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid argument for __vec_push (expected Vector)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __vec_set(vector, index, elemento) -> void
+            "__vec_set" => {
+                if argc != 3 {
+                    return Err(ExecutionError {
+                        message: format!("__vec_set expects 3 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let element = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_set (element)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let index = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_set (index)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let mut vector = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __vec_set (vector)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match (&mut vector, index) {
+                    (Value::Vector { data, .. }, Value::Number(idx)) => {
+                        let idx = idx as usize;
+                        if idx >= data.len() {
+                            return Err(ExecutionError {
+                                message: format!("Index {} out of bounds for vector of length {}", idx, data.len()),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        data[idx] = element;
+                        self.stack.push(vector); // Devolver vector modificado
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid arguments for __vec_set (expected Vector, Number, and Value)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            _ => Err(ExecutionError {
+                message: format!("Unknown vector builtin: {}", name),
+                instruction_index: self.pc,
+            }),
+        }
     }
 
 

@@ -380,6 +380,17 @@ impl<'a> SemanticPass<'a> {
                 self.binary_type(op, lt, rt)
             }
 
+            Expr::VecLiteral(items) => {
+                self.type_of_vec_literal(items)
+            }
+
+            Expr::Index { target, index } => {
+                self.type_of_index(target, index)
+            }
+
+            Expr::MethodCall { receiver, name, args } => {
+                self.type_of_solution_method(receiver, name, args)
+            }
             // Si tienes más variantes de Expr, añádelas aquí
             _ => Ty::Unknown,
         }
@@ -389,10 +400,14 @@ impl<'a> SemanticPass<'a> {
     fn compat(&self, expected: &Ty, got: &Ty) -> bool {
         if expected == got { return true; }
         if matches!(got, Ty::Unknown) { return true; }
-        
-        // Permisos especiales:
+
         match (expected, got) {
-            (Ty::Mass, Ty::AtomNum) => true, // promoción implícita a float
+            // promoción implícita int -> float
+            (Ty::Mass, Ty::AtomNum) => true,
+
+            // 🆕 solution<T> debe coincidir en T
+            (Ty::Solution(te), Ty::Solution(tg)) => self.compat(te, tg),
+
             _ => false,
         }
     }
@@ -491,6 +506,95 @@ impl<'a> SemanticPass<'a> {
                     }
                 }
             }
+            TypeName::Solution(inner) => Ty::Solution(Box::new(self.map_typename_to_ty(inner))),
         }
     }
+
+    fn type_of_vec_literal(&mut self, items: &[Expr]) -> Ty {
+    if items.is_empty() {
+        self.ctx.error("No se puede inferir el tipo de { } vacío; anote con solution<T>", 0, 0);
+        return Ty::Unknown;
+    }
+    let first = self.check_expr(&items[0]);
+    if matches!(first, Ty::Unknown) {
+        return Ty::Unknown;
+    }
+    for e in &items[1..] {
+        let t = self.check_expr(e);
+        if !self.compat(&first, &t) || !self.compat(&t, &first) {
+            self.ctx.error("Los literales de vector deben ser homogéneos", 0, 0);
+            return Ty::Unknown;
+        }
+    }
+    Ty::Solution(Box::new(first))
+}
+
+fn type_of_index(&mut self, target: &Expr, index: &Expr) -> Ty {
+    let tt = self.check_expr(target);
+    let ti = self.check_expr(index);
+    if ti != Ty::AtomNum {
+        self.ctx.error("El índice debe ser atom_num (entero ≥ 0)", 0, 0);
+        return Ty::Unknown;
+    }
+    match tt {
+        Ty::Solution(inner) => *inner,
+        _ => {
+            self.ctx.error("La indexación solo aplica a solution<T>", 0, 0);
+            Ty::Unknown
+        }
+    }
+}
+
+fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) -> Ty {
+    let rt = self.check_expr(recv);
+    match rt {
+        Ty::Solution(inner) => {
+            match name {
+                "len" => {
+                    if !args.is_empty() {
+                        self.ctx.error("len() espera 0 argumentos", 0, 0);
+                    }
+                    Ty::AtomNum
+                }
+                "push" => {
+                    if args.len() != 1 {
+                        self.ctx.error("push(x) espera 1 argumento", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    let at = self.check_expr(&args[0]);
+                    if !self.compat(&inner, &at) || !self.compat(&at, &inner) {
+                        self.ctx.error("push(x): el tipo de x no coincide con T", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    Ty::VoidState
+                }
+                "set" => {
+                    if args.len() != 2 {
+                        self.ctx.error("set(i, x) espera 2 argumentos", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    let i = self.check_expr(&args[0]);
+                    let x = self.check_expr(&args[1]);
+                    if i != Ty::AtomNum {
+                        self.ctx.error("set(i, x): i debe ser atom_num", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    if !self.compat(&inner, &x) || !self.compat(&x, &inner) {
+                        self.ctx.error("set(i, x): x no coincide con T", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    Ty::VoidState
+                }
+                _ => {
+                    self.ctx.error("Método desconocido para solution<T>", 0, 0);
+                    Ty::Unknown
+                }
+            }
+        }
+        _ => {
+            self.ctx.error("Llamada de método: receptor no es solution<T>", 0, 0);
+            Ty::Unknown
+        }
+    }
+}
 }

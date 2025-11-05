@@ -20,6 +20,10 @@ impl CodeGenerator {
             function_table: HashMap::new(),
         }
     }
+
+    fn emit_call_builtin<S: Into<String>>(&mut self, name: S, argc: usize) {
+        self.emit(Instruction::Call(name.into(), argc));
+    }
     
     // Función principal: generar código para todo el programa
     pub fn generate(&mut self, program: &Program) -> Result<Vec<Instruction>, String> {
@@ -171,6 +175,39 @@ impl CodeGenerator {
                 self.emit(instruction);
                 Ok(())
             }
+            Expr::VecLiteral(items) => {
+                // Empuja cada elemento en orden de evaluación
+                for it in items {
+                    self.generate_expr(it)?;
+                }
+                // Construye el vector con N elementos del stack
+                self.emit_call_builtin("__vec_from", items.len());
+                Ok(())
+            }
+
+            Expr::Index { target, index } => {
+                // Stack: target, index  → __vec_get
+                self.generate_expr(target)?;
+                self.generate_expr(index)?;
+                self.emit_call_builtin("__vec_get", 2);
+                Ok(())
+            }
+
+            Expr::MethodCall { receiver, name, args } => {
+                // Empuja receptor y argumentos
+                self.generate_expr(receiver)?;
+                for a in args {
+                    self.generate_expr(a)?;
+                }
+                let argc = 1 + args.len(); // receiver + args
+                match name.as_str() {
+                    "len"  => self.emit_call_builtin("__vec_len", argc),
+                    "push" => self.emit_call_builtin("__vec_push", argc),
+                    "set"  => self.emit_call_builtin("__vec_set", argc),
+                    _ => return Err(format!("Método no soportado en solution<T>: {}", name)),
+                }
+                Ok(())
+            }
         }
     }
     
@@ -231,7 +268,7 @@ impl CodeGenerator {
                     return Ok(()); // No ejecutar si count <= 0
                 }
                 
-                // 🆕 Iniciar captura del bucle: de 0 a count-1
+                // Iniciar captura del bucle: de 0 a count-1
                 self.emit(Instruction::StartLoopCapture(0, *count - 1, true));
                 
                 // Generar código del cuerpo (se capturará en el buffer)
@@ -332,6 +369,14 @@ impl std::fmt::Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Char(c) => write!(f, "{}", c),
             Value::Void => write!(f, "void"),
+            Value::Vector { data, .. } => {
+                write!(f, "[")?;
+                for (i, v) in data.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", v)?; // usa Display de Value para cada elemento
+                }
+                write!(f, "]")
+            },
         }
     }
 }
@@ -345,6 +390,7 @@ impl Value {
             Value::String(s) => !s.is_empty(),
             Value::Char(_) => true,
             Value::Void => false,
+            Value::Vector { data, .. } => !data.is_empty(),
         }
     }
     
@@ -363,6 +409,15 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::Char(c) => c.to_string(),
             Value::Void => "void".to_string(),
+            Value::Vector { data, .. } => {
+                let mut s = String::from("[");
+                for (i, v) in data.iter().enumerate() {
+                    if i > 0 { s.push_str(", "); }
+                    s.push_str(&v.to_string());
+                }
+                s.push(']');
+                s
+            },
         }
     }
 }

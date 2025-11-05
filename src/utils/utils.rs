@@ -26,6 +26,7 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "voidstate" => KwVoidState, // case-insensitive
         "formula" => KwFormula,
         "ion" => KwIon,
+        "solution" => KwSolution,
         // lógicos
         "and" => And,
         "or" => Or,

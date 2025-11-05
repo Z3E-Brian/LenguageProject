@@ -169,6 +169,12 @@ impl Lexer {
                     line,
                     col: sc,
                 },
+                '.' => Token {
+                    kind: TokenKind::Dot,
+                    lexeme: ".".into(),
+                    line,
+                    col: sc,
+                },
                 '<' => Token {
                     kind: TokenKind::Lt,
                     lexeme: "<".into(),

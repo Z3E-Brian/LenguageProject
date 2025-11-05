@@ -355,6 +355,19 @@ impl Parser {
             TokenKind::KwFormula => TypeName::Formula,
             TokenKind::KwSymbol => TypeName::Symbol,
             TokenKind::KwIon => TypeName::Ion,
+            //Soporte para solution<T> (vectores/arrays)
+            TokenKind::KwSolution => {
+                // Esperar '<'
+                self.consume(TokenKind::Lt, "Se esperaba '<' después de 'solution'")?;
+                
+                // Parsear el tipo interno recursivamente
+                let inner_type = self.parse_type()?;
+                
+                // Esperar '>'
+                self.consume(TokenKind::Gt, "Se esperaba '>' para cerrar el tipo 'solution'")?;
+                
+                TypeName::Solution(Box::new(inner_type))
+            }
             TokenKind::Ident => TypeName::Custom(tk.lexeme),
             _ => {
                 return Err(ParseError {
@@ -420,6 +433,55 @@ impl Parser {
 
         loop {
             let op = self.peek().clone();
+            
+            // Manejar operadores postfijos: indexación [idx] y llamadas a métodos .method()
+            if op.kind == TokenKind::LBracket {
+                // Indexación: expr[index]
+                self.advance(); // consumir '['
+                let index = self.parse_expr(0)?;
+                self.consume(TokenKind::RBracket, "Falta ']' después del índice")?;
+                lhs = Expr::Index {
+                    target: Box::new(lhs),
+                    index: Box::new(index),
+                };
+                continue;
+            }
+            
+            // Llamadas a métodos: expr.method(args)
+            if op.kind == TokenKind::Dot {
+                self.advance(); // consumir '.'
+                let method_name = self.consume(TokenKind::Ident, "Se esperaba nombre de método después de '.'")?;
+                
+                // Verificar si hay paréntesis para argumentos
+                let args = if self.check(&TokenKind::LParen) {
+                    self.advance(); // consumir '('
+                    let mut arguments = Vec::new();
+                    
+                    if !self.check(&TokenKind::RParen) {
+                        loop {
+                            arguments.push(self.parse_expr(0)?);
+                            if !self.check(&TokenKind::Comma) {
+                                break;
+                            }
+                            self.advance(); // consumir ','
+                        }
+                    }
+                    
+                    self.consume(TokenKind::RParen, "Falta ')' después de argumentos")?;
+                    arguments
+                } else {
+                    Vec::new()
+                };
+                
+                lhs = Expr::MethodCall {
+                    receiver: Box::new(lhs),
+                    name: method_name.lexeme.clone(),
+                    args,
+                };
+                continue;
+            }
+            
+            // Operadores binarios normales
             if let Some((lbp, rbp)) = infix_bp(&op.kind) {
                 if lbp < min_bp {
                     break;
@@ -450,6 +512,28 @@ impl Parser {
                 let e = self.parse_expr(0)?;
                 self.consume(RParen, "Falta ')'")?;
                 Ok(e)
+            }
+            LBracket => {
+                let mut items = Vec::new();
+                
+                // Vector vacío: []
+                if self.check(&RBracket) {
+                    self.advance();
+                    return Ok(Expr::VecLiteral(items));
+                }
+                
+                // Parsear elementos separados por comas
+                loop {
+                    items.push(self.parse_expr(0)?);
+                    
+                    if !self.check(&Comma) {
+                        break;
+                    }
+                    self.advance(); // consumir la coma
+                }
+                
+                self.consume(RBracket, "Falta ']' al final del vector")?;
+                Ok(Expr::VecLiteral(items))
             }
             _ => Err(ParseError {
                 message: format!("Expresión inválida. Encontré {:?}", t.kind),
