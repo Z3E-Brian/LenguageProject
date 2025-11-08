@@ -34,6 +34,7 @@ impl fmt::Display for TokenKind {
             KwFormula => "KW_FORMULA",
             KwIon => "KW_ION",
             KwSolution => "KW_SOLUTION",
+            KwSample => "KW_SAMPLE",
             And => "AND",
             Or => "OR",
             Not => "NOT",

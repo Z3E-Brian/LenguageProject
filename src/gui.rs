@@ -29,7 +29,6 @@ impl IDE {
     }
     
     pub fn show(&mut self, ctx: &egui::Context) {
-        // Aplicar tema claro si está activado
         if self.light_mode {
             ctx.set_visuals(egui::Visuals::light());
         } else {

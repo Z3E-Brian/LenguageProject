@@ -27,6 +27,7 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "formula" => KwFormula,
         "ion" => KwIon,
         "solution" => KwSolution,
+        "sample" => KwSample,
         // lógicos
         "and" => And,
         "or" => Or,

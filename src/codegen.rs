@@ -1,4 +1,4 @@
-use crate::utils::enums::{Expr, Stmt, TokenKind, Value, Instruction};
+use crate::utils::enums::{Expr, Stmt, TokenKind, Value, Instruction, TypeName, Ty};
 use crate::parser::Program;
 use std::collections::HashMap;
 
@@ -10,6 +10,7 @@ pub struct CodeGenerator {
     instructions: Vec<Instruction>,
     label_counter: usize,
     function_table: HashMap<String, usize>, // nombre -> posición en instrucciones
+    var_types: HashMap<String, Ty>,          // nombre -> tipo de variable
 }
 
 impl CodeGenerator {
@@ -18,6 +19,7 @@ impl CodeGenerator {
             instructions: Vec::new(),
             label_counter: 0,
             function_table: HashMap::new(),
+            var_types: HashMap::new(),
         }
     }
 
@@ -25,15 +27,38 @@ impl CodeGenerator {
         self.emit(Instruction::Call(name.into(), argc));
     }
     
+    // Helper para convertir TypeName a Ty
+    fn typename_to_ty(&self, tn: &TypeName) -> Ty {
+        match tn {
+            TypeName::AtomNum => Ty::AtomNum,
+            TypeName::Mass => Ty::Mass,
+            TypeName::Polarized => Ty::Polarized,
+            TypeName::Formula => Ty::Formula,
+            TypeName::VoidState => Ty::VoidState,
+            TypeName::Solution(inner) => Ty::Solution(Box::new(self.typename_to_ty(inner))),
+            TypeName::Sample(inner) => Ty::Sample(Box::new(self.typename_to_ty(inner))),
+            TypeName::Symbol => Ty::Unknown, // Not fully implemented
+            TypeName::Ion => Ty::Unknown,    // Not fully implemented
+            TypeName::Custom(_) => Ty::Unknown, // Not fully implemented
+        }
+    }
+    
     // Función principal: generar código para todo el programa
     pub fn generate(&mut self, program: &Program) -> Result<Vec<Instruction>, String> {
         self.instructions.clear();
+        self.var_types.clear();
         
-        // Primer pase: registrar todas las funciones
+        // Primer pase: registrar todas las funciones y recolectar tipos de variables
         for stmt in program {
-            if let Stmt::ReactionDecl { name, .. } = stmt {
-                // Reservar posición para la función (se llenará después)
-                self.function_table.insert(name.clone(), self.instructions.len());
+            match stmt {
+                Stmt::ReactionDecl { name, .. } => {
+                    // Reservar posición para la función (se llenará después)
+                    self.function_table.insert(name.clone(), self.instructions.len());
+                }
+                Stmt::VarDecl { name, ty, .. } | Stmt::ConstDecl { name, ty, .. } => {
+                    self.var_types.insert(name.clone(), self.typename_to_ty(ty));
+                }
+                _ => {}
             }
         }
         
@@ -49,22 +74,26 @@ impl CodeGenerator {
     
     fn generate_stmt(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
-            Stmt::VarDecl { name, ty: _, init } => {
+            Stmt::VarDecl { name, ty, init } => {
                 if let Some(expr) = init {
-                    self.generate_expr(expr)?;
+                    let target_ty = self.typename_to_ty(ty);
+                    self.generate_expr_with_type(expr, Some(&target_ty))?;
                     self.emit(Instruction::StoreVar(name.clone()));
                 }
                 Ok(())
             }
             
-            Stmt::ConstDecl { name, ty: _, value } => {
-                self.generate_expr(value)?;
+            Stmt::ConstDecl { name, ty, value } => {
+                let target_ty = self.typename_to_ty(ty);
+                self.generate_expr_with_type(value, Some(&target_ty))?;
                 self.emit(Instruction::StoreVar(name.clone()));
                 Ok(())
             }
             
             Stmt::Assign { name, value } => {
-                self.generate_expr(value)?;
+                // Look up the variable type if it exists
+                let target_ty = self.var_types.get(name).cloned();
+                self.generate_expr_with_type(value, target_ty.as_ref())?;
                 self.emit(Instruction::StoreVar(name.clone()));
                 Ok(())
             }
@@ -105,8 +134,43 @@ impl CodeGenerator {
             }
             
             Stmt::ExprStmt(expr) => {
+                // Special handling for mutating method calls
+                if let Expr::MethodCall { receiver, name, args } = expr {
+                    // Check if this is a mutating method (returns VoidState but modifies collection)
+                    let is_mutating = matches!(
+                        name.as_str(),
+                        "push" | "set" | "push_front" | "push_back" | "insert"
+                    );
+                    
+                    if is_mutating {
+                        // If receiver is an identifier, we need to update it
+                        if let Expr::Ident(var_name) = receiver.as_ref() {
+                            // Load the variable
+                            self.generate_expr(receiver)?;
+                            // Push arguments
+                            for a in args {
+                                self.generate_expr(a)?;
+                            }
+                            // Call the method (which returns modified collection)
+                            let argc = 1 + args.len();
+                            match name.as_str() {
+                                "push" => self.emit_call_builtin("__vec_push", argc),
+                                "set"  => self.emit_call_builtin("__vec_set", argc),
+                                "push_front" => self.emit_call_builtin("__list_push_front", argc),
+                                "push_back"  => self.emit_call_builtin("__list_push_back", argc),
+                                "insert"     => self.emit_call_builtin("__list_insert", argc),
+                                _ => return Err(format!("Unknown mutating method: {}", name)),
+                            }
+                            // Store the result back to the variable
+                            self.emit(Instruction::StoreVar(var_name.clone()));
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                // Default: evaluate expression and discard result
                 self.generate_expr(expr)?;
-                self.emit(Instruction::Pop); // Descartar resultado
+                self.emit(Instruction::Pop);
                 Ok(())
             }
             
@@ -117,6 +181,33 @@ impl CodeGenerator {
     }
     
     // ===== GENERACION DE EXPRESIONES =====
+    
+    // ===== GENERACION DE EXPRESIONES =====
+    
+    // Wrapper that passes type context for special cases like VecLiteral
+    fn generate_expr_with_type(&mut self, expr: &Expr, target_ty: Option<&Ty>) -> Result<(), String> {
+        match expr {
+            Expr::VecLiteral(items) => {
+                // Check if target type is Sample, if so generate list instead of vector
+                let is_list = target_ty.map_or(false, |ty| matches!(ty, Ty::Sample(_)));
+                
+                // Empuja cada elemento en orden de evaluación
+                for it in items {
+                    self.generate_expr(it)?;
+                }
+                
+                // Construye vector o lista según el tipo esperado
+                if is_list {
+                    self.emit_call_builtin("__list_from", items.len());
+                } else {
+                    self.emit_call_builtin("__vec_from", items.len());
+                }
+                Ok(())
+            }
+            // Para otras expresiones, usar el método estándar
+            _ => self.generate_expr(expr),
+        }
+    }
     
     fn generate_expr(&mut self, expr: &Expr) -> Result<(), String> {
         match expr {
@@ -184,6 +275,17 @@ impl CodeGenerator {
                 self.emit_call_builtin("__vec_from", items.len());
                 Ok(())
             }
+            
+            // 🆕 Soporte para literales de listas
+            Expr::ListLiteral(items) => {
+                // Empuja cada elemento en orden de evaluación
+                for it in items {
+                    self.generate_expr(it)?;
+                }
+                // Construye la lista con N elementos del stack
+                self.emit_call_builtin("__list_from", items.len());
+                Ok(())
+            }
 
             Expr::Index { target, index } => {
                 // Stack: target, index  → __vec_get
@@ -201,10 +303,21 @@ impl CodeGenerator {
                 }
                 let argc = 1 + args.len(); // receiver + args
                 match name.as_str() {
+                    // Métodos de vectores (solution<T>)
                     "len"  => self.emit_call_builtin("__vec_len", argc),
                     "push" => self.emit_call_builtin("__vec_push", argc),
                     "set"  => self.emit_call_builtin("__vec_set", argc),
-                    _ => return Err(format!("Método no soportado en solution<T>: {}", name)),
+                    "pop"  => self.emit_call_builtin("__vec_pop", argc),
+                    
+                    // 🆕 Métodos de listas (sample<T>)
+                    "push_front" => self.emit_call_builtin("__list_push_front", argc),
+                    "push_back"  => self.emit_call_builtin("__list_push_back", argc),
+                    "pop_front"  => self.emit_call_builtin("__list_pop_front", argc),
+                    "pop_back"   => self.emit_call_builtin("__list_pop_back", argc),
+                    "insert"     => self.emit_call_builtin("__list_insert", argc),
+                    "remove"     => self.emit_call_builtin("__list_remove", argc),
+                    
+                    _ => return Err(format!("Método no soportado: {}", name)),
                 }
                 Ok(())
             }
@@ -377,6 +490,14 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             },
+            Value::List { nodes, .. } => {
+                write!(f, "⟨")?;
+                for (i, v) in nodes.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", v)?;
+                }
+                write!(f, "⟩")
+            },
         }
     }
 }
@@ -391,6 +512,7 @@ impl Value {
             Value::Char(_) => true,
             Value::Void => false,
             Value::Vector { data, .. } => !data.is_empty(),
+            Value::List { nodes, .. } => !nodes.is_empty(),
         }
     }
     
@@ -416,6 +538,15 @@ impl Value {
                     s.push_str(&v.to_string());
                 }
                 s.push(']');
+                s
+            },
+            Value::List { nodes, .. } => {
+                let mut s = String::from("⟨");
+                for (i, v) in nodes.iter().enumerate() {
+                    if i > 0 { s.push_str(", "); }
+                    s.push_str(&v.to_string());
+                }
+                s.push_str("⟩");
                 s
             },
         }

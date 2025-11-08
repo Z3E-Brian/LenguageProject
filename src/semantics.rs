@@ -383,6 +383,10 @@ impl<'a> SemanticPass<'a> {
             Expr::VecLiteral(items) => {
                 self.type_of_vec_literal(items)
             }
+            
+            Expr::ListLiteral(items) => {
+                self.type_of_list_literal(items)
+            }
 
             Expr::Index { target, index } => {
                 self.type_of_index(target, index)
@@ -404,9 +408,9 @@ impl<'a> SemanticPass<'a> {
         match (expected, got) {
             // promoción implícita int -> float
             (Ty::Mass, Ty::AtomNum) => true,
-
-            // 🆕 solution<T> debe coincidir en T
             (Ty::Solution(te), Ty::Solution(tg)) => self.compat(te, tg),
+            (Ty::Sample(te), Ty::Sample(tg)) => self.compat(te, tg),
+            (Ty::Sample(te), Ty::Solution(tg)) => self.compat(te, tg),
 
             _ => false,
         }
@@ -494,8 +498,8 @@ impl<'a> SemanticPass<'a> {
             TypeName::Polarized => Ty::Polarized,
             TypeName::VoidState => Ty::VoidState,
             TypeName::Formula => Ty::Formula,
-            TypeName::Symbol => Ty::Formula, // Symbol se trata como string por ahora
-            TypeName::Ion => Ty::Mass,       // Ion se trata como float por ahora
+            TypeName::Symbol => Ty::Formula, 
+            TypeName::Ion => Ty::Mass,       
             TypeName::Custom(name) => {
                 // Para tipos custom, busca en la tabla de símbolos o usa Unknown
                 match self.ctx.lookup(name) {
@@ -507,12 +511,13 @@ impl<'a> SemanticPass<'a> {
                 }
             }
             TypeName::Solution(inner) => Ty::Solution(Box::new(self.map_typename_to_ty(inner))),
+            TypeName::Sample(inner) => Ty::Sample(Box::new(self.map_typename_to_ty(inner))),
         }
     }
 
     fn type_of_vec_literal(&mut self, items: &[Expr]) -> Ty {
     if items.is_empty() {
-        self.ctx.error("No se puede inferir el tipo de { } vacío; anote con solution<T>", 0, 0);
+        self.ctx.error("No se puede inferir el tipo de [ ] vacío; anote con solution<T>", 0, 0);
         return Ty::Unknown;
     }
     let first = self.check_expr(&items[0]);
@@ -529,6 +534,25 @@ impl<'a> SemanticPass<'a> {
     Ty::Solution(Box::new(first))
 }
 
+fn type_of_list_literal(&mut self, items: &[Expr]) -> Ty {
+    if items.is_empty() {
+        self.ctx.error("No se puede inferir el tipo de [ ] vacío; anote con sample<T>", 0, 0);
+        return Ty::Unknown;
+    }
+    let first = self.check_expr(&items[0]);
+    if matches!(first, Ty::Unknown) {
+        return Ty::Unknown;
+    }
+    for e in &items[1..] {
+        let t = self.check_expr(e);
+        if !self.compat(&first, &t) || !self.compat(&t, &first) {
+            self.ctx.error("Los literales de lista deben ser homogéneos", 0, 0);
+            return Ty::Unknown;
+        }
+    }
+    Ty::Sample(Box::new(first))
+}
+
 fn type_of_index(&mut self, target: &Expr, index: &Expr) -> Ty {
     let tt = self.check_expr(target);
     let ti = self.check_expr(index);
@@ -538,8 +562,9 @@ fn type_of_index(&mut self, target: &Expr, index: &Expr) -> Ty {
     }
     match tt {
         Ty::Solution(inner) => *inner,
+        Ty::Sample(inner) => *inner,
         _ => {
-            self.ctx.error("La indexación solo aplica a solution<T>", 0, 0);
+            self.ctx.error("La indexación solo aplica a solution<T> o sample<T>", 0, 0);
             Ty::Unknown
         }
     }
@@ -585,14 +610,81 @@ fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) ->
                     }
                     Ty::VoidState
                 }
+                "pop" => {
+                    if !args.is_empty() {
+                        self.ctx.error("pop() espera 0 argumentos", 0, 0);
+                    }
+                    *inner
+                }
                 _ => {
                     self.ctx.error("Método desconocido para solution<T>", 0, 0);
                     Ty::Unknown
                 }
             }
         }
+        Ty::Sample(inner) => {
+            match name {
+                "len" => {
+                    if !args.is_empty() {
+                        self.ctx.error("len() espera 0 argumentos", 0, 0);
+                    }
+                    Ty::AtomNum
+                }
+                "push_front" | "push_back" => {
+                    if args.len() != 1 {
+                        self.ctx.error(&format!("{}(x) espera 1 argumento", name), 0, 0);
+                        return Ty::Unknown;
+                    }
+                    let at = self.check_expr(&args[0]);
+                    if !self.compat(&inner, &at) || !self.compat(&at, &inner) {
+                        self.ctx.error(&format!("{}(x): el tipo de x no coincide con T", name), 0, 0);
+                        return Ty::Unknown;
+                    }
+                    Ty::VoidState
+                }
+                "pop_front" | "pop_back" => {
+                    if !args.is_empty() {
+                        self.ctx.error(&format!("{}() espera 0 argumentos", name), 0, 0);
+                    }
+                    *inner
+                }
+                "insert" => {
+                    if args.len() != 2 {
+                        self.ctx.error("insert(i, x) espera 2 argumentos", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    let i = self.check_expr(&args[0]);
+                    let x = self.check_expr(&args[1]);
+                    if i != Ty::AtomNum {
+                        self.ctx.error("insert(i, x): i debe ser atom_num", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    if !self.compat(&inner, &x) || !self.compat(&x, &inner) {
+                        self.ctx.error("insert(i, x): x no coincide con T", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    Ty::VoidState
+                }
+                "remove" => {
+                    if args.len() != 1 {
+                        self.ctx.error("remove(i) espera 1 argumento", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    let i = self.check_expr(&args[0]);
+                    if i != Ty::AtomNum {
+                        self.ctx.error("remove(i): i debe ser atom_num", 0, 0);
+                        return Ty::Unknown;
+                    }
+                    *inner
+                }
+                _ => {
+                    self.ctx.error("Método desconocido para sample<T>", 0, 0);
+                    Ty::Unknown
+                }
+            }
+        }
         _ => {
-            self.ctx.error("Llamada de método: receptor no es solution<T>", 0, 0);
+            self.ctx.error("Llamada de método: receptor no es solution<T> ni sample<T>", 0, 0);
             Ty::Unknown
         }
     }

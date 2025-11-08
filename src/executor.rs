@@ -364,9 +364,9 @@ impl Executor {
 
             // ===== LLAMADAS A FUNCIONES Y BUILTINS =====
             Instruction::Call(name, argc) => {
-                // Manejar funciones builtin para vectores
-                if name.starts_with("__vec_") {
-                    self.execute_vector_builtin(name, *argc)?;
+                // Manejar funciones builtin para vectores y listas
+                if name.starts_with("__vec_") || name.starts_with("__list_") {
+                    self.execute_builtin(name, *argc)?;
                     Ok(true)
                 } else {
                     Err(ExecutionError {
@@ -639,10 +639,12 @@ impl Executor {
         Ok(())
     }
 
-    fn execute_vector_builtin(&mut self, name: &str, argc: usize) -> Result<(), ExecutionError> {
+    // EJECUTAR FUNCIONES BUILTIN PARA VECTORES Y LISTAS
+    fn execute_builtin(&mut self, name: &str, argc: usize) -> Result<(), ExecutionError> {
         use crate::utils::enums::Ty;
         
         match name {
+            // ===== OPERACIONES DE VECTORES (solution<T>) =====
             // __vec_from(elem1, elem2, ..., elemN) -> Vector
             "__vec_from" => {
                 if argc == 0 {
@@ -679,6 +681,7 @@ impl Executor {
                         Value::Char(_) => Ty::Formula,
                         Value::Void => Ty::VoidState,
                         Value::Vector { elem, .. } => elem.clone(),
+                        Value::List { elem, .. } => elem.clone(),
                     }
                 } else {
                     Ty::Unknown
@@ -691,70 +694,6 @@ impl Executor {
                 });
                 
                 Ok(())
-            }
-            
-            // __vec_get(vector, index) -> elemento
-            "__vec_get" => {
-                if argc != 2 {
-                    return Err(ExecutionError {
-                        message: format!("__vec_get expects 2 arguments, got {}", argc),
-                        instruction_index: self.pc,
-                    });
-                }
-                
-                let index = self.stack.pop().ok_or_else(|| ExecutionError {
-                    message: "Stack underflow in __vec_get (index)".to_string(),
-                    instruction_index: self.pc,
-                })?;
-                
-                let vector = self.stack.pop().ok_or_else(|| ExecutionError {
-                    message: "Stack underflow in __vec_get (vector)".to_string(),
-                    instruction_index: self.pc,
-                })?;
-                
-                match (vector, index) {
-                    (Value::Vector { data, .. }, Value::Number(idx)) => {
-                        let idx = idx as usize;
-                        if idx >= data.len() {
-                            return Err(ExecutionError {
-                                message: format!("Index {} out of bounds for vector of length {}", idx, data.len()),
-                                instruction_index: self.pc,
-                            });
-                        }
-                        self.stack.push(data[idx].clone());
-                        Ok(())
-                    }
-                    _ => Err(ExecutionError {
-                        message: "Invalid arguments for __vec_get (expected Vector and Number)".to_string(),
-                        instruction_index: self.pc,
-                    }),
-                }
-            }
-            
-            // __vec_len(vector) -> número
-            "__vec_len" => {
-                if argc != 1 {
-                    return Err(ExecutionError {
-                        message: format!("__vec_len expects 1 argument, got {}", argc),
-                        instruction_index: self.pc,
-                    });
-                }
-                
-                let vector = self.stack.pop().ok_or_else(|| ExecutionError {
-                    message: "Stack underflow in __vec_len".to_string(),
-                    instruction_index: self.pc,
-                })?;
-                
-                match vector {
-                    Value::Vector { data, .. } => {
-                        self.stack.push(Value::Number(data.len() as f64));
-                        Ok(())
-                    }
-                    _ => Err(ExecutionError {
-                        message: "Invalid argument for __vec_len (expected Vector)".to_string(),
-                        instruction_index: self.pc,
-                    }),
-                }
             }
             
             // __vec_push(vector, elemento) -> void
@@ -833,8 +772,353 @@ impl Executor {
                 }
             }
             
+            // ===== OPERACIONES DE LISTAS (sample<T>) =====
+            
+            // __list_from(elem1, elem2, ..., elemN) -> List
+            "__list_from" => {
+                if argc == 0 {
+                    // Lista vacía
+                    self.stack.push(Value::List {
+                        elem: Ty::Unknown,
+                        nodes: Vec::new(),
+                    });
+                    return Ok(());
+                }
+                
+                // Recolectar elementos del stack
+                let mut elements = Vec::with_capacity(argc);
+                for _ in 0..argc {
+                    if let Some(value) = self.stack.pop() {
+                        elements.push(value);
+                    } else {
+                        return Err(ExecutionError {
+                            message: format!("Stack underflow in __list_from (expected {} elements)", argc),
+                            instruction_index: self.pc,
+                        });
+                    }
+                }
+                
+                // Revertir orden
+                elements.reverse();
+                
+                // Inferir tipo del primer elemento
+                let elem_type = if let Some(first) = elements.first() {
+                    match first {
+                        Value::Number(_) => Ty::AtomNum,
+                        Value::String(_) => Ty::Formula,
+                        Value::Bool(_) => Ty::Polarized,
+                        Value::Char(_) => Ty::Formula,
+                        Value::Void => Ty::VoidState,
+                        Value::Vector { elem, .. } => elem.clone(),
+                        Value::List { elem, .. } => elem.clone(),
+                    }
+                } else {
+                    Ty::Unknown
+                };
+                
+                // Crear lista
+                self.stack.push(Value::List {
+                    elem: elem_type,
+                    nodes: elements,
+                });
+                
+                Ok(())
+            }
+            
+            // __list_push_front(list, elemento) -> void
+            "__list_push_front" => {
+                if argc != 2 {
+                    return Err(ExecutionError {
+                        message: format!("__list_push_front expects 2 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let element = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_push_front (element)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let mut list = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_push_front (list)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match &mut list {
+                    Value::List { nodes, .. } => {
+                        nodes.insert(0, element); // Insertar al inicio
+                        self.stack.push(list);
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid argument for __list_push_front (expected List)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_push_back(list, elemento) -> void
+            "__list_push_back" => {
+                if argc != 2 {
+                    return Err(ExecutionError {
+                        message: format!("__list_push_back expects 2 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let element = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_push_back (element)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let mut list = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_push_back (list)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match &mut list {
+                    Value::List { nodes, .. } => {
+                        nodes.push(element); // Agregar al final
+                        self.stack.push(list);
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid argument for __list_push_back (expected List)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_pop_front(list) -> elemento
+            "__list_pop_front" => {
+                if argc != 1 {
+                    return Err(ExecutionError {
+                        message: format!("__list_pop_front expects 1 argument, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let mut list = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_pop_front".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match &mut list {
+                    Value::List { nodes, .. } => {
+                        if nodes.is_empty() {
+                            return Err(ExecutionError {
+                                message: "Cannot pop from empty list".to_string(),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        let element = nodes.remove(0); // Eliminar del inicio
+                        self.stack.push(element);
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid argument for __list_pop_front (expected List)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_pop_back(list) -> elemento
+            "__list_pop_back" => {
+                if argc != 1 {
+                    return Err(ExecutionError {
+                        message: format!("__list_pop_back expects 1 argument, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let mut list = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_pop_back".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match &mut list {
+                    Value::List { nodes, .. } => {
+                        if nodes.is_empty() {
+                            return Err(ExecutionError {
+                                message: "Cannot pop from empty list".to_string(),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        let element = nodes.pop().unwrap(); // Eliminar del final
+                        self.stack.push(element);
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid argument for __list_pop_back (expected List)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_insert(list, index, elemento) -> void
+            "__list_insert" => {
+                if argc != 3 {
+                    return Err(ExecutionError {
+                        message: format!("__list_insert expects 3 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let element = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_insert (element)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let index = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_insert (index)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let mut list = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_insert (list)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match (&mut list, index) {
+                    (Value::List { nodes, .. }, Value::Number(idx)) => {
+                        let idx = idx as usize;
+                        if idx > nodes.len() {
+                            return Err(ExecutionError {
+                                message: format!("Index {} out of bounds for list of length {}", idx, nodes.len()),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        nodes.insert(idx, element);
+                        self.stack.push(list);
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid arguments for __list_insert (expected List, Number, and Value)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_remove(list, index) -> elemento
+            "__list_remove" => {
+                if argc != 2 {
+                    return Err(ExecutionError {
+                        message: format!("__list_remove expects 2 arguments, got {}", argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let index = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_remove (index)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let mut list = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: "Stack underflow in __list_remove (list)".to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match (&mut list, index) {
+                    (Value::List { nodes, .. }, Value::Number(idx)) => {
+                        let idx = idx as usize;
+                        if idx >= nodes.len() {
+                            return Err(ExecutionError {
+                                message: format!("Index {} out of bounds for list of length {}", idx, nodes.len()),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        let element = nodes.remove(idx);
+                        self.stack.push(element);
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: "Invalid arguments for __list_remove (expected List and Number)".to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_get (reutiliza __vec_get pero para listas)
+            "__list_get" | "__vec_get" => {
+                if argc != 2 {
+                    return Err(ExecutionError {
+                        message: format!("{} expects 2 arguments, got {}", name, argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let index = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: format!("Stack underflow in {} (index)", name).to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                let collection = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: format!("Stack underflow in {} (collection)", name).to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match (collection, index) {
+                    (Value::Vector { data, .. }, Value::Number(idx)) => {
+                        let idx = idx as usize;
+                        if idx >= data.len() {
+                            return Err(ExecutionError {
+                                message: format!("Index {} out of bounds for vector of length {}", idx, data.len()),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        self.stack.push(data[idx].clone());
+                        Ok(())
+                    }
+                    (Value::List { nodes, .. }, Value::Number(idx)) => {
+                        let idx = idx as usize;
+                        if idx >= nodes.len() {
+                            return Err(ExecutionError {
+                                message: format!("Index {} out of bounds for list of length {}", idx, nodes.len()),
+                                instruction_index: self.pc,
+                            });
+                        }
+                        self.stack.push(nodes[idx].clone());
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: format!("Invalid arguments for {} (expected collection and Number)", name).to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
+            // __list_len (reutiliza __vec_len pero para listas)
+            "__list_len" | "__vec_len" => {
+                if argc != 1 {
+                    return Err(ExecutionError {
+                        message: format!("{} expects 1 argument, got {}", name, argc),
+                        instruction_index: self.pc,
+                    });
+                }
+                
+                let collection = self.stack.pop().ok_or_else(|| ExecutionError {
+                    message: format!("Stack underflow in {}", name).to_string(),
+                    instruction_index: self.pc,
+                })?;
+                
+                match collection {
+                    Value::Vector { data, .. } => {
+                        self.stack.push(Value::Number(data.len() as f64));
+                        Ok(())
+                    }
+                    Value::List { nodes, .. } => {
+                        self.stack.push(Value::Number(nodes.len() as f64));
+                        Ok(())
+                    }
+                    _ => Err(ExecutionError {
+                        message: format!("Invalid argument for {} (expected collection)", name).to_string(),
+                        instruction_index: self.pc,
+                    }),
+                }
+            }
+            
             _ => Err(ExecutionError {
-                message: format!("Unknown vector builtin: {}", name),
+                message: format!("Unknown builtin: {}", name),
                 instruction_index: self.pc,
             }),
         }

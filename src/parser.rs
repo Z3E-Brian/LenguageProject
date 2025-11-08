@@ -368,6 +368,19 @@ impl Parser {
                 
                 TypeName::Solution(Box::new(inner_type))
             }
+            // Soporte para sample<T>
+            TokenKind::KwSample => {
+                // Esperar '<'
+                self.consume(TokenKind::Lt, "Se esperaba '<' después de 'sample'")?;
+                
+                // Parsear el tipo interno recursivamente
+                let inner_type = self.parse_type()?;
+                
+                // Esperar '>'
+                self.consume(TokenKind::Gt, "Se esperaba '>' para cerrar el tipo 'sample'")?;
+                
+                TypeName::Sample(Box::new(inner_type))
+            }
             TokenKind::Ident => TypeName::Custom(tk.lexeme),
             _ => {
                 return Err(ParseError {

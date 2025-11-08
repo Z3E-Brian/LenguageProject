@@ -24,6 +24,7 @@ pub enum TokenKind {
     KwFormula,
     KwIon,
     KwSolution,
+    KwSample,
     // logical
     And,
     Or,
@@ -61,7 +62,7 @@ pub type Block = Vec<Stmt>;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion, Custom(String),Solution(Box<TypeName>),}
+pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion, Custom(String),Solution(Box<TypeName>),Sample(Box<TypeName>),}
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -85,6 +86,7 @@ pub enum Expr {
     Unary { op: TokenKind, rhs: Box<Expr> },
     Binary { lhs: Box<Expr>, op: TokenKind, rhs: Box<Expr> },
     VecLiteral(Vec<Expr>),
+    ListLiteral(Vec<Expr>),
     Index { target: Box<Expr>, index: Box<Expr> },
     MethodCall { receiver: Box<Expr>, name: String, args: Vec<Expr> },
 }
@@ -163,6 +165,10 @@ pub enum Value {
         elem: Ty,        // tipo de los elementos
         data: Vec<Value> // datos
     },
+    List {
+        elem: Ty,        // tipo de los elementos
+        nodes: Vec<Value> // nodos enlazados (simulados con Vec para simplicidad)
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,4 +181,5 @@ pub enum Ty {
     Unknown,    // tipo desconocido (para no abortar al 1er error)
     Function(Vec<Ty>, Box<Ty>), // params, retorno
     Solution(Box<Ty>),
+    Sample(Box<Ty>),
 }
