@@ -77,7 +77,7 @@ impl IDE {
 
         // Mostrar ventana de snippets si está activado
         if self.show_snippets {
-            egui::Window::new("🧩 Snippets de Código")
+            egui::Window::new("Snippets de Código")
                 .collapsible(false)
                 .resizable(true)
                 .default_width(400.0)
@@ -91,44 +91,68 @@ impl IDE {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::BLACK))
             .show(ctx, |ui| {
-                // Distribución en dos columnas
-                ui.columns(2, |cols| {
+                let available_height = ui.available_height();
+                let available_width = ui.available_width();
+                
+                // Usar horizontal layout con espaciado
+                ui.horizontal(|ui| {
                     // -------- IZQUIERDA: EDITOR --------
-                    cols[0].vertical(|ui| {
+                    ui.vertical(|ui| {
+                        let panel_width = available_width / 2.0 - 10.0;
+                        ui.set_width(panel_width);
+                        ui.set_height(available_height);
+                        
                         ui.label(egui::RichText::new("EDITOR").color(egui::Color32::WHITE).strong());
-                        // Caja del editor con un gris oscuro para diferenciar del fondo
+                        ui.add_space(4.0);
+                        
+                        let editor_height = available_height - 28.0; 
                         egui::Frame::group(ui.style())
                             .fill(egui::Color32::from_rgb(30, 30, 30))
                             .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
                             .show(ui, |ui| {
-                                let h = ui.available_height() - 12.0; // reservar un poco de margen
-                                ui.add_sized(
-                                    [ui.available_width(), h],
-                                    egui::TextEdit::multiline(&mut self.code)
-                                        .code_editor()
-                                        .text_color(egui::Color32::WHITE)
-                                        .hint_text("Escribe tu código aquí..."),
-                                );
+                                egui::ScrollArea::vertical()
+                                    .id_source("editor_scroll")
+                                    .max_height(editor_height)
+                                    .show(ui, |ui| {
+                                        ui.add_sized(
+                                            [panel_width - 18.0, editor_height],
+                                            egui::TextEdit::multiline(&mut self.code)
+                                                .code_editor()
+                                                .text_color(egui::Color32::WHITE)
+                                                .hint_text("Escribe tu código aquí..."),
+                                        );
+                                    });
                             });
                     });
 
-                    // -------- DERECHA: OUTPUT + BOTONES DEBAJO --------
-                    cols[1].vertical(|ui| {
-                        ui.label(egui::RichText::new("OUTPUT").color(egui::Color32::WHITE).strong());
+                    ui.add_space(8.0);
 
+                    // -------- DERECHA: OUTPUT + BOTONES DEBAJO --------
+                    ui.vertical(|ui| {
+                        let panel_width = available_width / 2.0 - 10.0;
+                        ui.set_width(panel_width);
+                        ui.set_height(available_height);
+                        
+                        ui.label(egui::RichText::new("OUTPUT").color(egui::Color32::WHITE).strong());
+                        ui.add_space(4.0);
+
+                        let output_height = available_height - 70.0; 
+                        
                         egui::Frame::group(ui.style())
                             .fill(egui::Color32::from_rgb(30, 30, 30))
                             .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
                             .show(ui, |ui| {
-                                // Área de salida (solo lectura)
-                                let h = ui.available_height() - 58.0; // dejar espacio para botones
-                                ui.add_sized(
-                                    [ui.available_width(), h],
-                                    egui::TextEdit::multiline(&mut self.output)
-                                        .interactive(false)
-                                        .text_color(egui::Color32::WHITE)
-                                        .desired_rows(12),
-                                );
+                                egui::ScrollArea::vertical()
+                                    .id_source("output_scroll")
+                                    .max_height(output_height)
+                                    .show(ui, |ui| {
+                                        ui.add_sized(
+                                            [panel_width - 20.0, output_height],
+                                            egui::TextEdit::multiline(&mut self.output)
+                                                .interactive(false)
+                                                .text_color(egui::Color32::WHITE),
+                                        );
+                                    });
                             });
 
                         ui.add_space(8.0);

@@ -460,20 +460,14 @@ impl Executor {
 
     fn setup_loop_variables(&mut self) {
         if let Some(current_scope) = self.variables.last_mut() {
-            // NO limpiar variables anteriores - cada scope debe mantener solo su propia variable
-            // El tamaño del stack indica qué nivel de bucle estamos
-            let current_level = self.loop_counter_stack.len();
-            
-            if current_level > 0 {
-                // Obtener el contador del nivel actual (el último en el stack)
-                let counter = self.loop_counter_stack[current_level - 1];
-                let var_name = format!("loop_{}", current_level); // 1-indexed
+            current_scope.retain(|k, _| !k.starts_with("loop_"));
+            for (index, &counter) in self.loop_counter_stack.iter().enumerate() {
+                let var_name = format!("loop_{}", index + 1); // 1-indexed
                 current_scope.insert(var_name, Value::Number(counter as f64));
             }
         }
     }
 
-    // 🎯 EJECUTAR BUCLE INMEDIATAMENTE CON ACCESO A INSTRUCCIONES (COMO C++)
     fn execute_loop_immediately_with_instructions(&mut self, initial: i32, limit: i32, ascending: bool, instructions: &[Instruction]) -> Result<(), ExecutionError> {
         let start_pc = self.pc; // StartLoopCapture actual
         let mut end_pc = start_pc + 1;
