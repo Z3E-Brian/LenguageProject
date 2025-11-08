@@ -460,16 +460,16 @@ impl Executor {
 
     fn setup_loop_variables(&mut self) {
         if let Some(current_scope) = self.variables.last_mut() {
-            // Limpiar variables de bucle anteriores
-            current_scope.retain(|k, _| !k.starts_with("loop_"));
+            // NO limpiar variables anteriores - cada scope debe mantener solo su propia variable
+            // El tamaño del stack indica qué nivel de bucle estamos
+            let current_level = self.loop_counter_stack.len();
             
-            // Crear variables loop_1, loop_2, loop_3, ... (1-indexed desde exterior)
-            for (index, &counter) in self.loop_counter_stack.iter().enumerate() {
-                let var_name = format!("loop_{}", index + 1); // 1-indexed
+            if current_level > 0 {
+                // Obtener el contador del nivel actual (el último en el stack)
+                let counter = self.loop_counter_stack[current_level - 1];
+                let var_name = format!("loop_{}", current_level); // 1-indexed
                 current_scope.insert(var_name, Value::Number(counter as f64));
             }
-            
-            // Variables loop_N configuradas correctamente
         }
     }
 
@@ -548,8 +548,52 @@ impl Executor {
             
             match instruction {
                 Instruction::StartLoopCapture(initial, limit, ascending) => {
-                    // Bucle anidado: ejecutar con el contexto simplificado
-                    self.execute_nested_loop(*initial, *limit, *ascending, body_instructions)?;
+                    // Bucle anidado: encontrar su cuerpo y ejecutarlo recursivamente
+                    let start_idx = self.pc;
+                    let mut end_idx = start_idx + 1;
+                    let mut nested_count = 0;
+                    
+                    // Encontrar el EndLoopCapture correspondiente
+                    while end_idx < body_instructions.len() {
+                        match &body_instructions[end_idx] {
+                            Instruction::StartLoopCapture(_, _, _) => nested_count += 1,
+                            Instruction::EndLoopCapture => {
+                                if nested_count == 0 { break; }
+                                nested_count -= 1;
+                            }
+                            _ => {}
+                        }
+                        end_idx += 1;
+                    }
+                    
+                    let nested_body = &body_instructions[start_idx + 1..end_idx];
+                    
+                    // Ejecutar el bucle anidado
+                    let mut counter = *initial;
+                    while {
+                        if *ascending { counter <= *limit } else { counter >= *limit }
+                    } {
+                        self.loop_counter_stack.push(counter);
+                        self.variables.push(HashMap::new());
+                        self.setup_loop_variables();
+                        
+                        // 🔄 RECURSIÓN: ejecutar el cuerpo que puede contener más bucles
+                        self.execute_body_slice(nested_body)?;
+                        
+                        self.loop_counter_stack.pop();
+                        if self.variables.len() > 1 {
+                            self.variables.pop();
+                        }
+                        
+                        if *ascending { counter += 1; } else { counter -= 1; }
+                    }
+                    
+                    // Saltar hasta después del EndLoopCapture
+                    self.pc = end_idx;
+                }
+                Instruction::EndLoopCapture => {
+                    // EndLoopCapture ya fue manejado por el bucle padre
+                    // Solo avanzar
                 }
                 _ => {
                     match self.execute_instruction(instruction) {
@@ -607,20 +651,85 @@ impl Executor {
             let saved_pc = self.pc;
             self.pc = 0;
             
-            for instruction in nested_body {
-                if let Instruction::StartLoopCapture(_, _, _) | Instruction::EndLoopCapture = instruction {
-                    continue; // Saltar instrucciones de bucle en bucles anidados por ahora
+            let mut i = 0;
+            while i < nested_body.len() {
+                let instruction = &nested_body[i];
+                
+                match instruction {
+                    Instruction::StartLoopCapture(inner_initial, inner_limit, inner_ascending) => {
+                        // Bucle doblemente anidado: encontrar su cuerpo y ejecutar
+                        let inner_start = i;
+                        let mut inner_end = i + 1;
+                        let mut inner_nested = 0;
+                        
+                        while inner_end < nested_body.len() {
+                            match &nested_body[inner_end] {
+                                Instruction::StartLoopCapture(_, _, _) => inner_nested += 1,
+                                Instruction::EndLoopCapture => {
+                                    if inner_nested == 0 { break; }
+                                    inner_nested -= 1;
+                                }
+                                _ => {}
+                            }
+                            inner_end += 1;
+                        }
+                        
+                        let inner_body = &nested_body[inner_start + 1..inner_end];
+                        
+                        // Ejecutar el bucle interno
+                        let mut inner_counter = *inner_initial;
+                        while {
+                            if *inner_ascending { inner_counter <= *inner_limit } else { inner_counter >= *inner_limit }
+                        } {
+                            self.loop_counter_stack.push(inner_counter);
+                            self.variables.push(HashMap::new());
+                            self.setup_loop_variables();
+                            
+                            // Ejecutar instrucciones del bucle interno
+                            for inner_instr in inner_body {
+                                if matches!(inner_instr, Instruction::EndLoopCapture) {
+                                    continue;
+                                }
+                                if let Err(e) = self.execute_instruction(inner_instr) {
+                                    self.pc = saved_pc;
+                                    return Err(e);
+                                }
+                            }
+                            
+                            self.loop_counter_stack.pop();
+                            if self.variables.len() > 1 {
+                                self.variables.pop();
+                            }
+                            
+                            if *inner_ascending { inner_counter += 1; } else { inner_counter -= 1; }
+                        }
+                        
+                        // Saltar hasta después del EndLoopCapture del bucle interno
+                        i = inner_end + 1;
+                        continue;
+                    }
+                    Instruction::EndLoopCapture => {
+                        // Saltamos EndLoopCapture ya que fue procesado
+                        i += 1;
+                        continue;
+                    }
+                    _ => {
+                        match self.execute_instruction(instruction) {
+                            Ok(should_continue) => {
+                                if !should_continue { 
+                                    self.pc = saved_pc;
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                self.pc = saved_pc;
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
                 
-                match self.execute_instruction(instruction) {
-                    Ok(should_continue) => {
-                        if !should_continue { break; }
-                    }
-                    Err(e) => {
-                        self.pc = saved_pc;
-                        return Err(e);
-                    }
-                }
+                i += 1;
             }
             
             self.pc = saved_pc;
