@@ -240,6 +240,14 @@ impl<'a> SemanticPass<'a> {
                 }
             }
 
+            // capture(variable_name);
+            Stmt::Capture { var_name } => {
+                // Verificar que la variable existe
+                if self.ctx.lookup(var_name).is_none() {
+                    self.ctx.error(format!("Variable '{}' no declarada para capture", var_name), 0, 0);
+                }
+            }
+
             // itest (cond) { ... } notest { ... }
             Stmt::If { arms, else_block, .. } => {
                 for (cond, _) in arms {

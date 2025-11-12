@@ -75,8 +75,11 @@ impl CodeGenerator {
     fn generate_stmt(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
             Stmt::VarDecl { name, ty, init } => {
+                let target_ty = self.typename_to_ty(ty);
+                // Registrar el tipo de la variable en el ejecutor
+                self.emit(Instruction::RegisterVarType(name.clone(), target_ty.clone()));
+                
                 if let Some(expr) = init {
-                    let target_ty = self.typename_to_ty(ty);
                     self.generate_expr_with_type(expr, Some(&target_ty))?;
                     self.emit(Instruction::StoreVar(name.clone()));
                 }
@@ -85,6 +88,9 @@ impl CodeGenerator {
             
             Stmt::ConstDecl { name, ty, value } => {
                 let target_ty = self.typename_to_ty(ty);
+                // Registrar el tipo de la constante en el ejecutor
+                self.emit(Instruction::RegisterVarType(name.clone(), target_ty.clone()));
+                
                 self.generate_expr_with_type(value, Some(&target_ty))?;
                 self.emit(Instruction::StoreVar(name.clone()));
                 Ok(())
@@ -113,6 +119,12 @@ impl CodeGenerator {
                     self.generate_expr(arg)?;
                 }
                 self.emit(Instruction::Emit(args.len()));
+                Ok(())
+            }
+            
+            Stmt::Capture { var_name } => {
+                // Generar instrucción para capturar entrada del usuario
+                self.emit(Instruction::Capture(var_name.clone()));
                 Ok(())
             }
             

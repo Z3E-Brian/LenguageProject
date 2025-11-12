@@ -20,6 +20,7 @@ impl fmt::Display for TokenKind {
             KwRelease => "KW_RELEASE",
             KwEmitln => "KW_EMITLN",
             KwEmit => "KW_EMIT",
+            KwCapture => "KW_CAPTURE",
             KwSynthesize => "KW_SYNTHESIZE",
             KwChain => "KW_CHAIN",
             KwTo => "KW_TO",

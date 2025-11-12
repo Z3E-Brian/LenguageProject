@@ -3,7 +3,6 @@ use eframe::egui;
 use eframe::NativeOptions;
 use eframe::App;
 
-#[derive(Default)]
 pub struct IDE {
     pub code: String,
     pub output: String,
@@ -11,6 +10,34 @@ pub struct IDE {
     pub show_options: bool,
     pub show_snippets: bool,
     pub selected_tab: SnippetTab,
+    pub waiting_for_input: bool,
+    pub input_var_name: String,
+    pub input_var_type: crate::utils::enums::Ty,
+    pub input_buffer: String,
+    pub executor_state: Option<ExecutorState>,
+}
+
+pub struct ExecutorState {
+    pub executor: crate::executor::Executor,
+    pub instructions: Vec<crate::utils::enums::Instruction>,
+}
+
+impl Default for IDE {
+    fn default() -> Self {
+        Self {
+            code: String::new(),
+            output: String::new(),
+            light_mode: false,
+            show_options: false,
+            show_snippets: false,
+            selected_tab: SnippetTab::default(),
+            waiting_for_input: false,
+            input_var_name: String::new(),
+            input_var_type: crate::utils::enums::Ty::Unknown,
+            input_buffer: String::new(),
+            executor_state: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -138,20 +165,74 @@ impl IDE {
 
                         let output_height = available_height - 70.0; 
                         
-                        egui::Frame::group(ui.style())
-                            .fill(egui::Color32::from_rgb(30, 30, 30))
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                        // Terminal estilo C++ - fondo negro puro, texto monoespacio
+                        egui::Frame::none()
+                            .fill(egui::Color32::BLACK)
+                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 180, 0)))
+                            .inner_margin(egui::Margin::same(8.0))
                             .show(ui, |ui| {
                                 egui::ScrollArea::vertical()
                                     .id_source("output_scroll")
                                     .max_height(output_height)
+                                    .auto_shrink([false, false])
                                     .show(ui, |ui| {
-                                        ui.add_sized(
-                                            [panel_width - 20.0, output_height],
+                                        ui.set_width(panel_width - 20.0);
+                                        
+                                        // Mostrar el output con estilo terminal
+                                        ui.add(
                                             egui::TextEdit::multiline(&mut self.output)
                                                 .interactive(false)
-                                                .text_color(egui::Color32::WHITE),
+                                                .text_color(egui::Color32::from_rgb(0, 255, 0)) // Verde brillante estilo terminal
+                                                .font(egui::FontId::monospace(14.0))
+                                                .desired_width(panel_width - 36.0)
                                         );
+                                        
+                                        // Si está esperando entrada, mostrar prompt estilo terminal
+                                        if self.waiting_for_input {
+                                            ui.add_space(5.0);
+                                            
+                                            // Mostrar tipo esperado en color cyan
+                                            let type_str = match &self.input_var_type {
+                                                crate::utils::enums::Ty::AtomNum => "int",
+                                                crate::utils::enums::Ty::Mass => "double",
+                                                crate::utils::enums::Ty::Polarized => "bool",
+                                                crate::utils::enums::Ty::Formula => "string",
+                                                _ => "value",
+                                            };
+                                            
+                                            ui.label(egui::RichText::new(format!("// Esperando entrada: {} (tipo: {})", self.input_var_name, type_str))
+                                                .color(egui::Color32::from_rgb(100, 200, 255)) // Cyan para comentarios
+                                                .font(egui::FontId::monospace(13.0)));
+                                            
+                                            // Prompt estilo terminal con cursor parpadeante
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("> ")
+                                                    .color(egui::Color32::from_rgb(255, 255, 0)) // Amarillo para el prompt
+                                                    .font(egui::FontId::monospace(14.0))
+                                                    .strong());
+                                                
+                                                // Campo de entrada estilo terminal
+                                                let response = ui.add(
+                                                    egui::TextEdit::singleline(&mut self.input_buffer)
+                                                        .text_color(egui::Color32::WHITE)
+                                                        .font(egui::FontId::monospace(14.0))
+                                                        .desired_width(panel_width - 60.0)
+                                                        .hint_text("")
+                                                );
+                                                
+                                                // Si presiona Enter, procesar la entrada
+                                                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                                    self.process_input();
+                                                }
+                                                
+                                                // Mantener el foco en el campo de entrada
+                                                if self.waiting_for_input {
+                                                    response.request_focus();
+                                                }
+                                            });
+                                            
+                                            ui.add_space(5.0);
+                                        }
                                     });
                             });
 
@@ -200,21 +281,190 @@ impl IDE {
         }
     }
 
-    fn ejecutar(&self) -> String {
+    fn ejecutar(&mut self) -> String {
         if self.code.trim().is_empty() {
             return "Error: archivo vacío".into();
         }
 
-        // Usar el nuevo pipeline completo de compilación y ejecución
-        match crate::compile_and_execute(&self.code) {
-            Ok(output) => {
-                if output.is_empty() {
-                    "Programa ejecutado sin salida.".into()
+        // Iniciar ejecución (reset estado si había algo anterior)
+        self.waiting_for_input = false;
+        self.input_var_name.clear();
+        self.input_buffer.clear();
+        self.output.clear();
+
+        // 1. Compilar el código
+        let tokens = match crate::run_lexer(&self.code) {
+            Ok(toks) => toks,
+            Err(e) => return format!("Error léxico: {}", e),
+        };
+
+        let ast = match crate::run_parser(tokens) {
+            Ok(ast) => ast,
+            Err(e) => return format!("Error de parseo: {} @ {}:{}", e.message, e.line, e.col),
+        };
+
+        match crate::run_semantics(&ast) {
+            Ok(_) => {},
+            Err(errors) => {
+                let mut err_msg = String::from("Errores semánticos:\n");
+                for e in errors {
+                    err_msg.push_str(&format!("- {} @ {}:{}\n", e.msg, e.line, e.col));
+                }
+                return err_msg;
+            }
+        }
+
+        let instructions = match crate::run_codegen(&ast) {
+            Ok(instrs) => instrs,
+            Err(e) => return format!("Error de generación de código: {}", e),
+        };
+
+        // 2. Crear ejecutor y comenzar ejecución
+        let mut executor = crate::executor::Executor::new();
+        
+        // Ejecutar hasta encontrar un Capture o terminar
+        match self.execute_until_input(&mut executor, &instructions) {
+            Ok(finished) => {
+                if finished {
+                    // Programa terminado
+                    self.output = executor.get_output().to_string();
+                    self.executor_state = None;
+                    if self.output.is_empty() {
+                        "Programa ejecutado sin salida.".into()
+                    } else {
+                        self.output.clone()
+                    }
                 } else {
-                    output
+                    // Esperando entrada
+                    self.output = executor.get_output().to_string();
+                    self.executor_state = Some(ExecutorState { executor, instructions });
+                    self.output.clone()
                 }
             }
-            Err(error) => error,
+            Err(e) => format!("Error de ejecución: {}", e),
+        }
+    }
+    
+    fn execute_until_input(
+        &mut self,
+        executor: &mut crate::executor::Executor,
+        instructions: &[crate::utils::enums::Instruction],
+    ) -> Result<bool, String> {
+        // Ejecutar instrucciones hasta encontrar Capture o terminar
+        executor.execute_until_capture(instructions)
+            .map(|status| {
+                match status {
+                    crate::executor::ExecutionStatus::WaitingForInput(var_name, var_type) => {
+                        self.waiting_for_input = true;
+                        self.input_var_name = var_name;
+                        self.input_var_type = var_type;
+                        false // No terminado
+                    }
+                    crate::executor::ExecutionStatus::Finished => {
+                        self.waiting_for_input = false;
+                        true // Terminado
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())
+    }
+    
+    fn process_input(&mut self) {
+        if let Some(mut state) = self.executor_state.take() {
+            let input_text = self.input_buffer.trim();
+            
+            // Agregar el input al output (eco estilo terminal)
+            self.output.push_str(&format!("> {}\n", self.input_buffer));
+            
+            // Validar y parsear el input según el tipo esperado
+            let parse_result = match &self.input_var_type {
+                crate::utils::enums::Ty::AtomNum => {
+                    // Debe ser un número entero
+                    match input_text.parse::<f64>() {
+                        Ok(num) if num.fract() == 0.0 => {
+                            Ok(crate::utils::enums::Value::Number(num))
+                        }
+                        Ok(_) => Err(format!("❌ Error de tipo: '{}' requiere un número entero (int)", self.input_var_name)),
+                        Err(_) => Err(format!("❌ Error de tipo: '{}' requiere un número entero (int)", self.input_var_name)),
+                    }
+                }
+                crate::utils::enums::Ty::Mass => {
+                    // Debe ser un número (puede ser decimal)
+                    match input_text.parse::<f64>() {
+                        Ok(num) => Ok(crate::utils::enums::Value::Number(num)),
+                        Err(_) => Err(format!("❌ Error de tipo: '{}' requiere un número decimal (double)", self.input_var_name)),
+                    }
+                }
+                crate::utils::enums::Ty::Polarized => {
+                    // Debe ser true o false
+                    if input_text.eq_ignore_ascii_case("true") {
+                        Ok(crate::utils::enums::Value::Bool(true))
+                    } else if input_text.eq_ignore_ascii_case("false") {
+                        Ok(crate::utils::enums::Value::Bool(false))
+                    } else {
+                        Err(format!("❌ Error de tipo: '{}' requiere un booleano (bool: true/false)", self.input_var_name))
+                    }
+                }
+                crate::utils::enums::Ty::Formula => {
+                    // Cualquier texto es válido
+                    Ok(crate::utils::enums::Value::String(self.input_buffer.trim().to_string()))
+                }
+                _ => {
+                    // Para tipos desconocidos, intentar parsear como número o usar como string
+                    if let Ok(num) = input_text.parse::<f64>() {
+                        Ok(crate::utils::enums::Value::Number(num))
+                    } else if input_text.eq_ignore_ascii_case("true") {
+                        Ok(crate::utils::enums::Value::Bool(true))
+                    } else if input_text.eq_ignore_ascii_case("false") {
+                        Ok(crate::utils::enums::Value::Bool(false))
+                    } else {
+                        Ok(crate::utils::enums::Value::String(self.input_buffer.trim().to_string()))
+                    }
+                }
+            };
+            
+            // Limpiar el buffer de entrada
+            self.input_buffer.clear();
+            
+            match parse_result {
+                Ok(value) => {
+                    // Almacenar el valor capturado en el ejecutor
+                    state.executor.store_captured_value(&self.input_var_name, value);
+                    
+                    // Continuar ejecución
+                    match self.execute_until_input(&mut state.executor, &state.instructions) {
+                        Ok(finished) => {
+                            if finished {
+                                // Programa terminado - limpiar todo
+                                self.output = state.executor.get_output().to_string();
+                                self.executor_state = None;
+                                self.waiting_for_input = false;
+                            } else {
+                                // Todavía esperando más entrada - mantener el estado de espera
+                                self.output = state.executor.get_output().to_string();
+                                self.executor_state = Some(state);
+                                // waiting_for_input ya fue configurado a true en execute_until_input
+                            }
+                        }
+                        Err(e) => {
+                            self.output.push_str(&format!("\n❌ Error: {}\n", e));
+                            self.executor_state = None;
+                            self.waiting_for_input = false;
+                        }
+                    }
+                }
+                Err(error_msg) => {
+                    // Error de validación de tipo - mostrar mensaje y mantener esperando
+                    self.output.push_str(&format!("{}\n", error_msg));
+                    // Restaurar el estado y seguir esperando
+                    self.executor_state = Some(state);
+                    // waiting_for_input sigue siendo true
+                }
+            }
+        } else {
+            // No hay estado de ejecución, solo limpiar
+            self.input_buffer.clear();
+            self.waiting_for_input = false;
         }
     }
 
@@ -309,6 +559,12 @@ impl IDE {
             }
             if ui.button("📝 Emitln (con salto)").clicked() {
                 self.insert_snippet("emitln(\"mensaje\");");
+            }
+        });
+        
+        ui.horizontal(|ui| {
+            if ui.button("⌨️ Capture Variable").clicked() {
+                self.insert_snippet("!! Declarar variable primero\natom entrada : formula = \"\";\n!! Capturar entrada del usuario\ncapture(entrada);\nemitln(\"Entrada capturada: \", entrada);");
             }
         });
         
@@ -442,6 +698,14 @@ impl IDE {
     fn show_common_snippets(&mut self, ui: &mut egui::Ui) {
         ui.heading("🔧 Patrones Comunes");
         
+        if ui.button("⌨️ Programa con Entrada de Usuario").clicked() {
+            self.insert_snippet("!! Programa interactivo con capture()\natom nombre : formula = \"\";\natom edad : atom_num = 0;\n\nemitln(\"=== Bienvenido ===\");\nemitln(\"Por favor, ingrese su nombre:\");\ncapture(nombre);\n\nemitln(\"Ingrese su edad:\");\ncapture(edad);\n\nemitln(\"\");\nemitln(\"Hola, \", nombre, \"!\");\nemitln(\"Tienes \", edad, \" años.\");");
+        }
+        
+        if ui.button("🧮 Calculadora Interactiva").clicked() {
+            self.insert_snippet("!! Calculadora simple\natom num1 : atom_num = 0;\natom num2 : atom_num = 0;\n\nemitln(\"=== CALCULADORA ===\");\nemitln(\"Ingrese el primer número:\");\ncapture(num1);\n\nemitln(\"Ingrese el segundo número:\");\ncapture(num2);\n\natom suma : atom_num = num1 + num2;\natom resta : atom_num = num1 - num2;\natom mult : atom_num = num1 * num2;\n\nemitln(\"\");\nemitln(\"Resultados:\");\nemitln(\"Suma: \", suma);\nemitln(\"Resta: \", resta);\nemitln(\"Multiplicación: \", mult);");
+        }
+        
         if ui.button("🔢 Contador Simple").clicked() {
             self.insert_snippet("atom contador : atom_num = 0;\ncontador = contador + 1;\nemitln(\"Contador: \", contador);");
         }
@@ -456,6 +720,10 @@ impl IDE {
         
         if ui.button("📝 Manejo de Strings").clicked() {
             self.insert_snippet("atom nombre : formula = \"Usuario\";\natom saludo : formula = \"Hola, \" + nombre + \"!\";\nemitln(saludo);");
+        }
+        
+        if ui.button("🔄 Bucle con Entrada").clicked() {
+            self.insert_snippet("!! Bucle interactivo\natom limite : atom_num = 0;\n\nemitln(\"¿Hasta qué número contar?\");\ncapture(limite);\n\nemitln(\"Contando...\");\nchain 1 to limite {\n    emitln(\"Número: \", i);\n}");
         }
         
         if ui.button("🏗️ Programa Básico").clicked() {

@@ -8,6 +8,7 @@ pub enum TokenKind {
     KwRelease,
     KwEmitln,
     KwEmit,
+    KwCapture,
     KwSynthesize,
     KwChain,
     KwTo,
@@ -73,6 +74,7 @@ pub enum Stmt {
     ExprStmt(Expr),
     EmitLn(Vec<Expr>),  // Cambiado para aceptar múltiples argumentos
     Emit(Vec<Expr>),    // Cambiado para aceptar múltiples argumentos
+    Capture { var_name: String },  // Capturar entrada del usuario
     ReactionDecl { name: String, params: Vec<(String, TypeName)>, body: Block },
     Block(Block),
     Chain { start: Option<i32>, end: Option<i32>, body: Block },
@@ -140,6 +142,8 @@ pub enum Instruction {
     // I/O
     EmitLn(usize),              // Imprimir con salto (num_args)
     Emit(usize),                // Imprimir sin salto (num_args)
+    Capture(String),            // Capturar entrada del usuario (nombre de variable)
+    RegisterVarType(String, Ty), // Registrar tipo de variable (nombre, tipo)
     
     // Control de bucles (para futuro)
     Break,                      // Salir del bucle

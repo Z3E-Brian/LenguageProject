@@ -11,6 +11,7 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "release" => KwRelease,
         "emitln" => KwEmitln,
         "emit" => KwEmit,
+        "capture" => KwCapture,
         "synthesize" => KwSynthesize,
         "chain" => KwChain,
         "to" => KwTo,

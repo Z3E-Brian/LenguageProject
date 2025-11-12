@@ -1,15 +1,28 @@
-use crate::utils::enums::{Instruction, Value};
+use crate::utils::enums::{Instruction, Value, Ty};
 use std::collections::HashMap;
+
+// ===================== ESTADO DE EJECUCIÓN =====================
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExecutionStatus {
+    Finished,
+    WaitingForInput(String, Ty), // nombre de la variable y su tipo esperado
+}
+
+// ===================== CALLBACK PARA CAPTURA DE ENTRADA =====================
+pub type InputCallback = Box<dyn Fn(&str) -> Option<String>>;
 
 // ===================== MAQUINA VIRTUAL / EJECUTOR =====================
 
 pub struct Executor {
     stack: Vec<Value>,                      // Pila de valores
     variables: Vec<HashMap<String, Value>>, // Stack de scopes de variables
+    variable_types: HashMap<String, Ty>,    // Tipos de las variables declaradas
     output: String,                         // Salida del programa
     pc: usize,                              // Program counter (instruction pointer)
     call_stack: Vec<usize>,                 // Pila de llamadas (para funciones)
     loop_counter_stack: Vec<i32>,               // Stack de contadores [exterior -> interior]
+    pub input_callback: Option<InputCallback>,  // Callback para entrada del usuario
+    paused_for_input: bool,                 // Flag para indicar pausa por input
 }
 
 #[derive(Debug)]
@@ -35,11 +48,85 @@ impl Executor {
         Self {
             stack: Vec::new(),
             variables: vec![HashMap::new()], // Iniciamos con un scope global
+            variable_types: HashMap::new(),
             output: String::new(),
             pc: 0,
             call_stack: Vec::new(),
             loop_counter_stack: Vec::new(),
+            input_callback: None,
+            paused_for_input: false,
         }
+    }
+
+    // Registrar tipo de variable cuando se declara
+    pub fn register_variable_type(&mut self, name: &str, ty: Ty) {
+        self.variable_types.insert(name.to_string(), ty);
+    }
+
+    // Obtener tipo de variable
+    fn get_variable_type(&self, name: &str) -> Ty {
+        self.variable_types.get(name).cloned().unwrap_or(Ty::Unknown)
+    }
+
+    // Obtener el output actual
+    pub fn get_output(&self) -> &str {
+        &self.output
+    }
+
+    // Almacenar valor capturado del usuario
+    pub fn store_captured_value(&mut self, var_name: &str, value: Value) {
+        // Agregar el valor ingresado al output
+        self.output.push_str(&format!("{}\n", value.to_string()));
+        
+        // Buscar la variable en los scopes y actualizar su valor
+        for scope in self.variables.iter_mut().rev() {
+            if scope.contains_key(var_name) {
+                scope.insert(var_name.to_string(), value);
+                return;
+            }
+        }
+        // Si no existe, crearla en el scope actual
+        if let Some(current_scope) = self.variables.last_mut() {
+            current_scope.insert(var_name.to_string(), value);
+        }
+    }
+
+    // Ejecutar hasta encontrar una instrucción Capture o hasta terminar
+    pub fn execute_until_capture(&mut self, instructions: &[Instruction]) -> Result<ExecutionStatus, ExecutionError> {
+        self.paused_for_input = false;
+        
+        while self.pc < instructions.len() {
+            let current_instruction = &instructions[self.pc];
+            
+            // Si encontramos un Capture, pausar
+            if let Instruction::Capture(var_name) = current_instruction {
+                self.output.push_str(&format!(">> Ingrese valor para '{}': ", var_name));
+                self.paused_for_input = true;
+                self.pc += 1; // Avanzar PC para la siguiente ejecución
+                let var_type = self.get_variable_type(var_name);
+                return Ok(ExecutionStatus::WaitingForInput(var_name.clone(), var_type));
+            }
+            
+            match current_instruction {
+                Instruction::StartLoopCapture(initial, limit, ascending) => {
+                    self.execute_loop_immediately_with_instructions(*initial, *limit, *ascending, instructions)?;
+                    // El PC ya fue actualizado dentro de la función del bucle
+                }
+                _ => {
+                    match self.execute_instruction(current_instruction) {
+                        Ok(should_continue) => {
+                            if !should_continue {
+                                return Ok(ExecutionStatus::Finished);
+                            }
+                            self.pc += 1;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+        
+        Ok(ExecutionStatus::Finished)
     }
 
     // Función principal: ejecutar todas las instrucciones
@@ -327,6 +414,18 @@ impl Executor {
                     self.output.push_str(&part);
                 }
 
+                Ok(true)
+            }
+
+            Instruction::Capture(_var_name) => {
+                // Esta instrucción es manejada por execute_until_capture
+                // Si llegamos aquí es porque ya se procesó la entrada
+                Ok(true)
+            }
+
+            Instruction::RegisterVarType(name, ty) => {
+                // Registrar el tipo de la variable
+                self.register_variable_type(name, ty.clone());
                 Ok(true)
             }
 
