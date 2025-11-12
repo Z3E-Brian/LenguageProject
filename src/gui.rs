@@ -199,11 +199,7 @@ impl IDE {
                                                 crate::utils::enums::Ty::Formula => "string",
                                                 _ => "value",
                                             };
-                                            
-                                            ui.label(egui::RichText::new(format!("// Esperando entrada: {} (tipo: {})", self.input_var_name, type_str))
-                                                .color(egui::Color32::from_rgb(100, 200, 255)) // Cyan para comentarios
-                                                .font(egui::FontId::monospace(13.0)));
-                                            
+
                                             // Prompt estilo terminal con cursor parpadeante
                                             ui.horizontal(|ui| {
                                                 ui.label(egui::RichText::new("> ")
@@ -384,15 +380,15 @@ impl IDE {
                         Ok(num) if num.fract() == 0.0 => {
                             Ok(crate::utils::enums::Value::Number(num))
                         }
-                        Ok(_) => Err(format!("❌ Error de tipo: '{}' requiere un número entero (int)", self.input_var_name)),
-                        Err(_) => Err(format!("❌ Error de tipo: '{}' requiere un número entero (int)", self.input_var_name)),
+                        Ok(_) => Err(format!("❌ Error de tipo: '{}'", self.input_var_name)),
+                        Err(_) => Err(format!("❌ Error de tipo: '{}'", self.input_var_name)),
                     }
                 }
                 crate::utils::enums::Ty::Mass => {
                     // Debe ser un número (puede ser decimal)
                     match input_text.parse::<f64>() {
                         Ok(num) => Ok(crate::utils::enums::Value::Number(num)),
-                        Err(_) => Err(format!("❌ Error de tipo: '{}' requiere un número decimal (double)", self.input_var_name)),
+                        Err(_) => Err(format!("❌ Error de tipo: '{}'", self.input_var_name)),
                     }
                 }
                 crate::utils::enums::Ty::Polarized => {
@@ -402,7 +398,7 @@ impl IDE {
                     } else if input_text.eq_ignore_ascii_case("false") {
                         Ok(crate::utils::enums::Value::Bool(false))
                     } else {
-                        Err(format!("❌ Error de tipo: '{}' requiere un booleano (bool: true/false)", self.input_var_name))
+                        Err(format!("❌ Error de tipo: '{}'", self.input_var_name))
                     }
                 }
                 crate::utils::enums::Ty::Formula => {
@@ -454,11 +450,12 @@ impl IDE {
                     }
                 }
                 Err(error_msg) => {
-                    // Error de validación de tipo - mostrar mensaje y mantener esperando
+                    // Error de tipo - terminar ejecución como en C++
                     self.output.push_str(&format!("{}\n", error_msg));
-                    // Restaurar el estado y seguir esperando
-                    self.executor_state = Some(state);
-                    // waiting_for_input sigue siendo true
+                    self.output.push_str("Programa terminado debido a error de tipo.\n");
+                    // Limpiar estado - programa finalizado
+                    self.executor_state = None;
+                    self.waiting_for_input = false;
                 }
             }
         } else {
