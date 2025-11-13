@@ -1,4 +1,4 @@
-use crate::utils::enums::{Expr, Stmt, TokenKind, Value, Instruction};
+use crate::utils::enums::{Expr, Stmt, TokenKind, Value, Instruction, TypeName, Ty};
 use crate::parser::Program;
 use std::collections::HashMap;
 
@@ -10,6 +10,7 @@ pub struct CodeGenerator {
     instructions: Vec<Instruction>,
     label_counter: usize,
     function_table: HashMap<String, usize>, // nombre -> posición en instrucciones
+    var_types: HashMap<String, Ty>,          // nombre -> tipo de variable
 }
 
 impl CodeGenerator {
@@ -18,18 +19,46 @@ impl CodeGenerator {
             instructions: Vec::new(),
             label_counter: 0,
             function_table: HashMap::new(),
+            var_types: HashMap::new(),
+        }
+    }
+
+    fn emit_call_builtin<S: Into<String>>(&mut self, name: S, argc: usize) {
+        self.emit(Instruction::Call(name.into(), argc));
+    }
+    
+    // Helper para convertir TypeName a Ty
+    fn typename_to_ty(&self, tn: &TypeName) -> Ty {
+        match tn {
+            TypeName::AtomNum => Ty::AtomNum,
+            TypeName::Mass => Ty::Mass,
+            TypeName::Polarized => Ty::Polarized,
+            TypeName::Formula => Ty::Formula,
+            TypeName::VoidState => Ty::VoidState,
+            TypeName::Solution(inner) => Ty::Solution(Box::new(self.typename_to_ty(inner))),
+            TypeName::Sample(inner) => Ty::Sample(Box::new(self.typename_to_ty(inner))),
+            TypeName::Symbol => Ty::Unknown, // Not fully implemented
+            TypeName::Ion => Ty::Unknown,    // Not fully implemented
+            TypeName::Custom(_) => Ty::Unknown, // Not fully implemented
         }
     }
     
     // Función principal: generar código para todo el programa
     pub fn generate(&mut self, program: &Program) -> Result<Vec<Instruction>, String> {
         self.instructions.clear();
+        self.var_types.clear();
         
-        // Primer pase: registrar todas las funciones
+        // Primer pase: registrar todas las funciones y recolectar tipos de variables
         for stmt in program {
-            if let Stmt::ReactionDecl { name, .. } = stmt {
-                // Reservar posición para la función (se llenará después)
-                self.function_table.insert(name.clone(), self.instructions.len());
+            match stmt {
+                Stmt::ReactionDecl { name, .. } => {
+                    // Reservar posición para la función (se llenará después)
+                    self.function_table.insert(name.clone(), self.instructions.len());
+                }
+                Stmt::VarDecl { name, ty, .. } | Stmt::ConstDecl { name, ty, .. } => {
+                    self.var_types.insert(name.clone(), self.typename_to_ty(ty));
+                }
+                _ => {}
             }
         }
         
@@ -45,22 +74,32 @@ impl CodeGenerator {
     
     fn generate_stmt(&mut self, stmt: &Stmt) -> Result<(), String> {
         match stmt {
-            Stmt::VarDecl { name, ty: _, init } => {
+            Stmt::VarDecl { name, ty, init } => {
+                let target_ty = self.typename_to_ty(ty);
+                // Registrar el tipo de la variable en el ejecutor
+                self.emit(Instruction::RegisterVarType(name.clone(), target_ty.clone()));
+                
                 if let Some(expr) = init {
-                    self.generate_expr(expr)?;
+                    self.generate_expr_with_type(expr, Some(&target_ty))?;
                     self.emit(Instruction::StoreVar(name.clone()));
                 }
                 Ok(())
             }
             
-            Stmt::ConstDecl { name, ty: _, value } => {
-                self.generate_expr(value)?;
+            Stmt::ConstDecl { name, ty, value } => {
+                let target_ty = self.typename_to_ty(ty);
+                // Registrar el tipo de la constante en el ejecutor
+                self.emit(Instruction::RegisterVarType(name.clone(), target_ty.clone()));
+                
+                self.generate_expr_with_type(value, Some(&target_ty))?;
                 self.emit(Instruction::StoreVar(name.clone()));
                 Ok(())
             }
             
             Stmt::Assign { name, value } => {
-                self.generate_expr(value)?;
+                // Look up the variable type if it exists
+                let target_ty = self.var_types.get(name).cloned();
+                self.generate_expr_with_type(value, target_ty.as_ref())?;
                 self.emit(Instruction::StoreVar(name.clone()));
                 Ok(())
             }
@@ -83,6 +122,12 @@ impl CodeGenerator {
                 Ok(())
             }
             
+            Stmt::Capture { var_name } => {
+                // Generar instrucción para capturar entrada del usuario
+                self.emit(Instruction::Capture(var_name.clone()));
+                Ok(())
+            }
+            
             Stmt::If { arms, else_block } => {
                 self.generate_if(arms, else_block)
             }
@@ -101,14 +146,80 @@ impl CodeGenerator {
             }
             
             Stmt::ExprStmt(expr) => {
+                // Special handling for mutating method calls
+                if let Expr::MethodCall { receiver, name, args } = expr {
+                    // Check if this is a mutating method (returns VoidState but modifies collection)
+                    let is_mutating = matches!(
+                        name.as_str(),
+                        "push" | "set" | "push_front" | "push_back" | "insert"
+                    );
+                    
+                    if is_mutating {
+                        // If receiver is an identifier, we need to update it
+                        if let Expr::Ident(var_name) = receiver.as_ref() {
+                            // Load the variable
+                            self.generate_expr(receiver)?;
+                            // Push arguments
+                            for a in args {
+                                self.generate_expr(a)?;
+                            }
+                            // Call the method (which returns modified collection)
+                            let argc = 1 + args.len();
+                            match name.as_str() {
+                                "push" => self.emit_call_builtin("__vec_push", argc),
+                                "set"  => self.emit_call_builtin("__vec_set", argc),
+                                "push_front" => self.emit_call_builtin("__list_push_front", argc),
+                                "push_back"  => self.emit_call_builtin("__list_push_back", argc),
+                                "insert"     => self.emit_call_builtin("__list_insert", argc),
+                                _ => return Err(format!("Unknown mutating method: {}", name)),
+                            }
+                            // Store the result back to the variable
+                            self.emit(Instruction::StoreVar(var_name.clone()));
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                // Default: evaluate expression and discard result
                 self.generate_expr(expr)?;
-                self.emit(Instruction::Pop); // Descartar resultado
+                self.emit(Instruction::Pop);
                 Ok(())
+            }
+            
+            Stmt::Chain { start, end, body } => {
+                self.generate_chain(start, end, body)
             }
         }
     }
     
     // ===== GENERACION DE EXPRESIONES =====
+    
+    // ===== GENERACION DE EXPRESIONES =====
+    
+    // Wrapper that passes type context for special cases like VecLiteral
+    fn generate_expr_with_type(&mut self, expr: &Expr, target_ty: Option<&Ty>) -> Result<(), String> {
+        match expr {
+            Expr::VecLiteral(items) => {
+                // Check if target type is Sample, if so generate list instead of vector
+                let is_list = target_ty.map_or(false, |ty| matches!(ty, Ty::Sample(_)));
+                
+                // Empuja cada elemento en orden de evaluación
+                for it in items {
+                    self.generate_expr(it)?;
+                }
+                
+                // Construye vector o lista según el tipo esperado
+                if is_list {
+                    self.emit_call_builtin("__list_from", items.len());
+                } else {
+                    self.emit_call_builtin("__vec_from", items.len());
+                }
+                Ok(())
+            }
+            // Para otras expresiones, usar el método estándar
+            _ => self.generate_expr(expr),
+        }
+    }
     
     fn generate_expr(&mut self, expr: &Expr) -> Result<(), String> {
         match expr {
@@ -167,6 +278,61 @@ impl CodeGenerator {
                 self.emit(instruction);
                 Ok(())
             }
+            Expr::VecLiteral(items) => {
+                // Empuja cada elemento en orden de evaluación
+                for it in items {
+                    self.generate_expr(it)?;
+                }
+                // Construye el vector con N elementos del stack
+                self.emit_call_builtin("__vec_from", items.len());
+                Ok(())
+            }
+            
+            // 🆕 Soporte para literales de listas
+            Expr::ListLiteral(items) => {
+                // Empuja cada elemento en orden de evaluación
+                for it in items {
+                    self.generate_expr(it)?;
+                }
+                // Construye la lista con N elementos del stack
+                self.emit_call_builtin("__list_from", items.len());
+                Ok(())
+            }
+
+            Expr::Index { target, index } => {
+                // Stack: target, index  → __vec_get
+                self.generate_expr(target)?;
+                self.generate_expr(index)?;
+                self.emit_call_builtin("__vec_get", 2);
+                Ok(())
+            }
+
+            Expr::MethodCall { receiver, name, args } => {
+                // Empuja receptor y argumentos
+                self.generate_expr(receiver)?;
+                for a in args {
+                    self.generate_expr(a)?;
+                }
+                let argc = 1 + args.len(); // receiver + args
+                match name.as_str() {
+                    // Métodos de vectores (solution<T>)
+                    "len"  => self.emit_call_builtin("__vec_len", argc),
+                    "push" => self.emit_call_builtin("__vec_push", argc),
+                    "set"  => self.emit_call_builtin("__vec_set", argc),
+                    "pop"  => self.emit_call_builtin("__vec_pop", argc),
+                    
+                    // 🆕 Métodos de listas (sample<T>)
+                    "push_front" => self.emit_call_builtin("__list_push_front", argc),
+                    "push_back"  => self.emit_call_builtin("__list_push_back", argc),
+                    "pop_front"  => self.emit_call_builtin("__list_pop_front", argc),
+                    "pop_back"   => self.emit_call_builtin("__list_pop_back", argc),
+                    "insert"     => self.emit_call_builtin("__list_insert", argc),
+                    "remove"     => self.emit_call_builtin("__list_remove", argc),
+                    
+                    _ => return Err(format!("Método no soportado: {}", name)),
+                }
+                Ok(())
+            }
         }
     }
     
@@ -213,6 +379,51 @@ impl CodeGenerator {
         for jump_pos in jump_to_end_labels {
             if let Instruction::Jump(target) = &mut self.instructions[jump_pos] {
                 *target = end_pos;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn generate_chain(&mut self, start: &Option<i32>, end: &Option<i32>, body: &[Stmt]) -> Result<(), String> {
+        match (start, end) {
+            // chain N {} - ejecuta N veces
+            (Some(count), None) => {
+                if *count <= 0 {
+                    return Ok(()); // No ejecutar si count <= 0
+                }
+                
+                // Iniciar captura del bucle: de 0 a count-1
+                self.emit(Instruction::StartLoopCapture(0, *count - 1, true));
+                
+                // Generar código del cuerpo (se capturará en el buffer)
+                for stmt in body {
+                    self.generate_stmt(stmt)?;
+                }
+                
+                // Terminar captura y empezar ejecución cíclica
+                self.emit(Instruction::EndLoopCapture);
+            }
+            
+            // chain N to M {} - ejecuta desde N hasta M 
+            (Some(start_val), Some(end_val)) => {
+                // Determinar si es ascendente o descendente
+                let ascending = *start_val < *end_val;
+                
+                // 🆕 Iniciar captura del bucle
+                self.emit(Instruction::StartLoopCapture(*start_val, *end_val, ascending));
+                
+                // Generar código del cuerpo
+                for stmt in body {
+                    self.generate_stmt(stmt)?;
+                }
+                
+                // Terminar captura y empezar ejecución cíclica
+                self.emit(Instruction::EndLoopCapture);
+            }
+            
+            _ => {
+                return Err("Chain inválido: debe especificar al menos un valor inicial".to_string());
             }
         }
         
@@ -283,6 +494,22 @@ impl std::fmt::Display for Value {
             Value::Bool(b) => write!(f, "{}", b),
             Value::Char(c) => write!(f, "{}", c),
             Value::Void => write!(f, "void"),
+            Value::Vector { data, .. } => {
+                write!(f, "[")?;
+                for (i, v) in data.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", v)?; // usa Display de Value para cada elemento
+                }
+                write!(f, "]")
+            },
+            Value::List { nodes, .. } => {
+                write!(f, "⟨")?;
+                for (i, v) in nodes.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", v)?;
+                }
+                write!(f, "⟩")
+            },
         }
     }
 }
@@ -296,6 +523,8 @@ impl Value {
             Value::String(s) => !s.is_empty(),
             Value::Char(_) => true,
             Value::Void => false,
+            Value::Vector { data, .. } => !data.is_empty(),
+            Value::List { nodes, .. } => !nodes.is_empty(),
         }
     }
     
@@ -314,6 +543,24 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::Char(c) => c.to_string(),
             Value::Void => "void".to_string(),
+            Value::Vector { data, .. } => {
+                let mut s = String::from("[");
+                for (i, v) in data.iter().enumerate() {
+                    if i > 0 { s.push_str(", "); }
+                    s.push_str(&v.to_string());
+                }
+                s.push(']');
+                s
+            },
+            Value::List { nodes, .. } => {
+                let mut s = String::from("⟨");
+                for (i, v) in nodes.iter().enumerate() {
+                    if i > 0 { s.push_str(", "); }
+                    s.push_str(&v.to_string());
+                }
+                s.push_str("⟩");
+                s
+            },
         }
     }
 }

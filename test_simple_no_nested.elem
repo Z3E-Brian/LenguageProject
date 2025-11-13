@@ -1,0 +1,6 @@
+!! Test bucle simple sin anidacion
+chain 2 {
+    emit("Simple - loop_1 = ", loop_1, "\n");
+}
+
+emit("=== Fin simple ===\n");

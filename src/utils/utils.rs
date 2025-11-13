@@ -11,7 +11,10 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "release" => KwRelease,
         "emitln" => KwEmitln,
         "emit" => KwEmit,
+        "capture" => KwCapture,
         "synthesize" => KwSynthesize,
+        "chain" => KwChain,
+        "to" => KwTo,
         // declaración
         "atom" => KwAtom,
         "molecule" => KwMolecule,
@@ -24,6 +27,8 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "voidstate" => KwVoidState, // case-insensitive
         "formula" => KwFormula,
         "ion" => KwIon,
+        "solution" => KwSolution,
+        "sample" => KwSample,
         // lógicos
         "and" => And,
         "or" => Or,

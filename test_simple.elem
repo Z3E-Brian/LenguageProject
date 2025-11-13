@@ -1,0 +1,10 @@
+!! Test simple para debug
+chain 2 {
+    emit("A", loop_1, "\n");
+    chain 2 {
+        emit("B", loop_1, loop_2, "\n");
+    }
+    emit("C", loop_1, "\n");
+}
+
+emit("FIN\n");

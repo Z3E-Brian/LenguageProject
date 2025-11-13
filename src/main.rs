@@ -84,5 +84,22 @@ pub fn compile_and_execute(code: &str) -> Result<String, String> {
 }
 
 fn main() {
-    gui::run();
+    let args: Vec<String> = std::env::args().collect();
+    
+    if args.len() > 1 {
+        // Modo línea de comandos: ejecutar archivo
+        let filename = &args[1];
+        match std::fs::read_to_string(filename) {
+            Ok(code) => {
+                match compile_and_execute(&code) {
+                    Ok(output) => print!("{}", output),
+                    Err(error) => eprintln!("Error: {}", error),
+                }
+            }
+            Err(e) => eprintln!("Error leyendo archivo '{}': {}", filename, e),
+        }
+    } else {
+        // Modo GUI
+        gui::run();
+    }
 }

@@ -139,7 +139,9 @@ impl Parser {
             KwITest => self.parse_if_stmt(),
             KwEmitln => self.parse_emit_stmt(true),
             KwEmit => self.parse_emit_stmt(false),
+            KwCapture => self.parse_capture_stmt(),
             KwReaction => self.parse_reaction_decl(),
+            KwChain => self.parse_chain_stmt(),
             LBrace => self.parse_block().map(Stmt::Block),
             Ident => {
                 if let Ok(stmt) = self.try_parse_assign_stmt() {
@@ -290,6 +292,16 @@ impl Parser {
         })
     }
 
+    fn parse_capture_stmt(&mut self) -> Result<Stmt, ParseError> {
+        // capture(variable_name);
+        self.consume(TokenKind::KwCapture, "Falta 'capture'")?;
+        self.consume(TokenKind::LParen, "Se esperaba '(' después de capture")?;
+        let var_name = self.consume(TokenKind::Ident, "Se esperaba nombre de variable")?.lexeme;
+        self.consume(TokenKind::RParen, "Se esperaba ')' después del nombre de variable")?;
+        self.consume(TokenKind::Semi, "Se esperaba ';'")?;
+        Ok(Stmt::Capture { var_name })
+    }
+
     fn parse_reaction_decl(&mut self) -> Result<Stmt, ParseError> {
         // reaction <Ident> '(' param_list? ')' block
         use TokenKind::*;
@@ -354,6 +366,32 @@ impl Parser {
             TokenKind::KwFormula => TypeName::Formula,
             TokenKind::KwSymbol => TypeName::Symbol,
             TokenKind::KwIon => TypeName::Ion,
+            //Soporte para solution<T> (vectores/arrays)
+            TokenKind::KwSolution => {
+                // Esperar '<'
+                self.consume(TokenKind::Lt, "Se esperaba '<' después de 'solution'")?;
+                
+                // Parsear el tipo interno recursivamente
+                let inner_type = self.parse_type()?;
+                
+                // Esperar '>'
+                self.consume(TokenKind::Gt, "Se esperaba '>' para cerrar el tipo 'solution'")?;
+                
+                TypeName::Solution(Box::new(inner_type))
+            }
+            // Soporte para sample<T>
+            TokenKind::KwSample => {
+                // Esperar '<'
+                self.consume(TokenKind::Lt, "Se esperaba '<' después de 'sample'")?;
+                
+                // Parsear el tipo interno recursivamente
+                let inner_type = self.parse_type()?;
+                
+                // Esperar '>'
+                self.consume(TokenKind::Gt, "Se esperaba '>' para cerrar el tipo 'sample'")?;
+                
+                TypeName::Sample(Box::new(inner_type))
+            }
             TokenKind::Ident => TypeName::Custom(tk.lexeme),
             _ => {
                 return Err(ParseError {
@@ -364,6 +402,40 @@ impl Parser {
             }
         };
         Ok(ty)
+    }
+
+    fn parse_chain_stmt(&mut self) -> Result<Stmt, ParseError> {
+        // Parsea "chain N { ... }" o "chain N to M { ... }"
+        self.consume(TokenKind::KwChain, "Se esperaba 'chain'")?;
+        
+        // Parsear el número inicial
+        let start_token = self.consume(TokenKind::Number, "Se esperaba un número después de 'chain'")?;
+        let start = start_token.lexeme.parse::<i32>().map_err(|_| ParseError {
+            message: "Número inválido para chain".to_string(),
+            line: start_token.line,
+            col: start_token.col,
+        })?;
+        
+        let end = if self.match_next(&[TokenKind::KwTo]) {
+            // Es un ciclo "chain N to M"
+            let end_token = self.consume(TokenKind::Number, "Se esperaba un número después de 'to'")?;
+            Some(end_token.lexeme.parse::<i32>().map_err(|_| ParseError {
+                message: "Número inválido para chain end".to_string(),
+                line: end_token.line,
+                col: end_token.col,
+            })?)
+        } else {
+            // Es un ciclo "chain N"
+            None
+        };
+        
+        let body = self.parse_block()?;
+        
+        Ok(Stmt::Chain {
+            start: Some(start),
+            end,
+            body,
+        })
     }
 
     // ====== EXPRESIONES (Pratt) ======
@@ -385,6 +457,55 @@ impl Parser {
 
         loop {
             let op = self.peek().clone();
+            
+            // Manejar operadores postfijos: indexación [idx] y llamadas a métodos .method()
+            if op.kind == TokenKind::LBracket {
+                // Indexación: expr[index]
+                self.advance(); // consumir '['
+                let index = self.parse_expr(0)?;
+                self.consume(TokenKind::RBracket, "Falta ']' después del índice")?;
+                lhs = Expr::Index {
+                    target: Box::new(lhs),
+                    index: Box::new(index),
+                };
+                continue;
+            }
+            
+            // Llamadas a métodos: expr.method(args)
+            if op.kind == TokenKind::Dot {
+                self.advance(); // consumir '.'
+                let method_name = self.consume(TokenKind::Ident, "Se esperaba nombre de método después de '.'")?;
+                
+                // Verificar si hay paréntesis para argumentos
+                let args = if self.check(&TokenKind::LParen) {
+                    self.advance(); // consumir '('
+                    let mut arguments = Vec::new();
+                    
+                    if !self.check(&TokenKind::RParen) {
+                        loop {
+                            arguments.push(self.parse_expr(0)?);
+                            if !self.check(&TokenKind::Comma) {
+                                break;
+                            }
+                            self.advance(); // consumir ','
+                        }
+                    }
+                    
+                    self.consume(TokenKind::RParen, "Falta ')' después de argumentos")?;
+                    arguments
+                } else {
+                    Vec::new()
+                };
+                
+                lhs = Expr::MethodCall {
+                    receiver: Box::new(lhs),
+                    name: method_name.lexeme.clone(),
+                    args,
+                };
+                continue;
+            }
+            
+            // Operadores binarios normales
             if let Some((lbp, rbp)) = infix_bp(&op.kind) {
                 if lbp < min_bp {
                     break;
@@ -416,6 +537,28 @@ impl Parser {
                 self.consume(RParen, "Falta ')'")?;
                 Ok(e)
             }
+            LBracket => {
+                let mut items = Vec::new();
+                
+                // Vector vacío: []
+                if self.check(&RBracket) {
+                    self.advance();
+                    return Ok(Expr::VecLiteral(items));
+                }
+                
+                // Parsear elementos separados por comas
+                loop {
+                    items.push(self.parse_expr(0)?);
+                    
+                    if !self.check(&Comma) {
+                        break;
+                    }
+                    self.advance(); // consumir la coma
+                }
+                
+                self.consume(RBracket, "Falta ']' al final del vector")?;
+                Ok(Expr::VecLiteral(items))
+            }
             _ => Err(ParseError {
                 message: format!("Expresión inválida. Encontré {:?}", t.kind),
                 line: t.line,
@@ -432,7 +575,7 @@ impl Parser {
             }
             use TokenKind::*;
             match self.peek().kind {
-                KwAtom | KwMolecule | KwIon | KwITest | KwEmitln | KwEmit | KwReaction | LBrace => {
+                KwAtom | KwMolecule | KwIon | KwITest | KwEmitln | KwEmit | KwCapture | KwReaction | LBrace => {
                     return;
                 }
                 _ => {
@@ -509,6 +652,9 @@ pub fn print_ast(stmts: &Program) {
                     .join(", ");
                 println!("{p}Emit({})", args_str);
             }
+            Stmt::Capture { var_name } => {
+                println!("{p}Capture({})", var_name);
+            }
             Stmt::If { arms, else_block } => {
                 println!("{p}If");
                 for (i, (cond, blk)) in arms.iter().enumerate() {
@@ -543,145 +689,3 @@ pub fn print_ast(stmts: &Program) {
     }
 }
 
-// ===================== Tests basados en la 2da versión + extras =====================
-/*
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn t(k: TokenKind, s: &str) -> Token {
-        Token { kind: k, lexeme: s.into(), line: 1, col: 1 }
-    }
-
-    #[test]
-    fn var_decl_and_expr() {
-        // atom x : atom_num = 5 + 3 * 2;
-        let toks = vec![
-            t(TokenKind::KwAtom, "atom"),
-            t(TokenKind::Ident, "x"),
-            t(TokenKind::Colon, ":"),
-            t(TokenKind::KwAtomNum, "atom_num"),
-            t(TokenKind::Assign, "="),
-            t(TokenKind::Number, "5"),
-            t(TokenKind::Plus, "+"),
-            t(TokenKind::Number, "3"),
-            t(TokenKind::Star, "*"),
-            t(TokenKind::Number, "2"),
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::EndOfFile, ""),
-        ];
-        let mut p = Parser::new(toks);
-        let prog = p.parse_program().unwrap();
-        assert!(matches!(prog[0], Stmt::VarDecl { .. }));
-    }
-
-    #[test]
-    fn assign_and_logic() {
-        // x = 1 + 2 * 3 == 7 and not (0);
-        let toks = vec![
-            t(TokenKind::Ident, "x"),
-            t(TokenKind::Assign, "="),
-            t(TokenKind::Number, "1"),
-            t(TokenKind::Plus, "+"),
-            t(TokenKind::Number, "2"),
-            t(TokenKind::Star, "*"),
-            t(TokenKind::Number, "3"),
-            t(TokenKind::Eq, "=="),
-            t(TokenKind::Number, "7"),
-            t(TokenKind::And, "and"),
-            t(TokenKind::Not, "not"),
-            t(TokenKind::LParen, "("),
-            t(TokenKind::Number, "0"),
-            t(TokenKind::RParen, ")"),
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::EndOfFile, ""),
-        ];
-        let mut p = Parser::new(toks);
-        let prog = p.parse_program().unwrap();
-        assert!(matches!(prog[0], Stmt::Assign { .. }));
-    }
-
-    #[test]
-    fn if_with_inotest_and_else() {
-        // itest (1) { emitln "a"; } inotest (0) { emitln "b"; } notest { emitln "c"; }
-        let toks = vec![
-            t(TokenKind::KwITest, "itest"),
-            t(TokenKind::LParen, "("),
-            t(TokenKind::Number, "1"),
-            t(TokenKind::RParen, ")"),
-            t(TokenKind::LBrace, "{"),
-            t(TokenKind::KwEmitln, "emitln"),
-            t(TokenKind::StringLit, "a"),
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::RBrace, "}"),
-            t(TokenKind::KwInotest, "inotest"),
-            t(TokenKind::LParen, "("),
-            t(TokenKind::Number, "0"),
-            t(TokenKind::RParen, ")"),
-            t(TokenKind::LBrace, "{"),
-            t(TokenKind::KwEmitln, "emitln"),
-            t(TokenKind::StringLit, "b"),
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::RBrace, "}"),
-            t(TokenKind::KwNotest, "notest"),
-            t(TokenKind::LBrace, "{"),
-            t(TokenKind::KwEmitln, "emitln"),
-            t(TokenKind::StringLit, "c"),
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::RBrace, "}"),
-            t(TokenKind::EndOfFile, ""),
-        ];
-        let mut p = Parser::new(toks);
-        let prog = p.parse_program().unwrap();
-        assert!(matches!(prog[0], Stmt::If { .. }));
-    }
-
-    #[test]
-    fn reaction_two_param_forms() {
-        // reaction f(a: atom_num, mass b) { emitln "ok"; }
-        let toks = vec![
-            t(TokenKind::KwReaction, "reaction"),
-            t(TokenKind::Ident, "f"),
-            t(TokenKind::LParen, "("),
-            t(TokenKind::Ident, "a"),
-            t(TokenKind::Colon, ":"),
-            t(TokenKind::KwAtomNum, "atom_num"),
-            t(TokenKind::Comma, ","),
-            t(TokenKind::KwMass, "mass"),
-            t(TokenKind::Ident, "b"),
-            t(TokenKind::RParen, ")"),
-            t(TokenKind::LBrace, "{"),
-            t(TokenKind::KwEmitln, "emitln"),
-            t(TokenKind::StringLit, "ok"),
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::RBrace, "}"),
-            t(TokenKind::EndOfFile, ""),
-        ];
-        let mut p = Parser::new(toks);
-        let prog = p.parse_program().unwrap();
-        assert!(matches!(prog[0], Stmt::ReactionDecl { .. }));
-    }
-
-    #[test]
-    fn custom_type_in_var_decl() {
-        // atom x : Vector3;
-        let toks = vec![
-            t(TokenKind::KwAtom, "atom"),
-            t(TokenKind::Ident, "x"),
-            t(TokenKind::Colon, ":"),
-            t(TokenKind::Ident, "Vector3"), // TypeName::Custom("Vector3")
-            t(TokenKind::Semi, ";"),
-            t(TokenKind::EndOfFile, ""),
-        ];
-        let mut p = Parser::new(toks);
-        let prog = p.parse_program().unwrap();
-        match &prog[0] {
-            Stmt::VarDecl { ty, .. } => match ty {
-                TypeName::Custom(s) => assert_eq!(s, "Vector3"),
-                _ => panic!("Se esperaba TypeName::Custom"),
-            },
-            _ => panic!("Se esperaba VarDecl"),
-        }
-    }
-}
-*/

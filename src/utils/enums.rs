@@ -8,7 +8,10 @@ pub enum TokenKind {
     KwRelease,
     KwEmitln,
     KwEmit,
+    KwCapture,
     KwSynthesize,
+    KwChain,
+    KwTo,
     // decl
     KwAtom,
     KwMolecule,
@@ -21,6 +24,8 @@ pub enum TokenKind {
     KwVoidState,
     KwFormula,
     KwIon,
+    KwSolution,
+    KwSample,
     // logical
     And,
     Or,
@@ -44,6 +49,7 @@ pub enum TokenKind {
     RBracket,
     Colon,
     Comma,
+    Dot,
     Lt,
     Gt,
     Le,
@@ -57,7 +63,7 @@ pub type Block = Vec<Stmt>;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion, Custom(String) }
+pub enum TypeName { AtomNum, Mass, Polarized, VoidState, Formula, Symbol, Ion, Custom(String),Solution(Box<TypeName>),Sample(Box<TypeName>),}
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -68,8 +74,10 @@ pub enum Stmt {
     ExprStmt(Expr),
     EmitLn(Vec<Expr>),  // Cambiado para aceptar múltiples argumentos
     Emit(Vec<Expr>),    // Cambiado para aceptar múltiples argumentos
+    Capture { var_name: String },  // Capturar entrada del usuario
     ReactionDecl { name: String, params: Vec<(String, TypeName)>, body: Block },
     Block(Block),
+    Chain { start: Option<i32>, end: Option<i32>, body: Block },
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +87,10 @@ pub enum Expr {
     Ident(String),
     Unary { op: TokenKind, rhs: Box<Expr> },
     Binary { lhs: Box<Expr>, op: TokenKind, rhs: Box<Expr> },
+    VecLiteral(Vec<Expr>),
+    ListLiteral(Vec<Expr>),
+    Index { target: Box<Expr>, index: Box<Expr> },
+    MethodCall { receiver: Box<Expr>, name: String, args: Vec<Expr> },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -130,10 +142,16 @@ pub enum Instruction {
     // I/O
     EmitLn(usize),              // Imprimir con salto (num_args)
     Emit(usize),                // Imprimir sin salto (num_args)
+    Capture(String),            // Capturar entrada del usuario (nombre de variable)
+    RegisterVarType(String, Ty), // Registrar tipo de variable (nombre, tipo)
     
     // Control de bucles (para futuro)
     Break,                      // Salir del bucle
     Continue,                   // Siguiente iteración
+    
+    // 🆕 INSTRUCCIONES PARA STACK AUXILIAR DE BUCLES
+    StartLoopCapture(i32, i32, bool), // (inicial, límite, ascendente) - Empezar captura
+    EndLoopCapture,             // Terminar captura y empezar ejecución cíclica
     
     // Utilidades
     Pop,                        // Eliminar valor del stack
@@ -147,6 +165,14 @@ pub enum Value {
     Bool(bool),                 // polarized
     Char(char),                 // symbol (futuro)
     Void,                       // VoidState
+    Vector {
+        elem: Ty,        // tipo de los elementos
+        data: Vec<Value> // datos
+    },
+    List {
+        elem: Ty,        // tipo de los elementos
+        nodes: Vec<Value> // nodos enlazados (simulados con Vec para simplicidad)
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,4 +184,6 @@ pub enum Ty {
     VoidState,  // void/null
     Unknown,    // tipo desconocido (para no abortar al 1er error)
     Function(Vec<Ty>, Box<Ty>), // params, retorno
+    Solution(Box<Ty>),
+    Sample(Box<Ty>),
 }
