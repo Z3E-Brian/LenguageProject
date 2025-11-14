@@ -74,6 +74,18 @@ impl Lexer {
                 continue;
             }
 
+            // caracteres con comillas simples
+            if c == '\'' {
+                let (ch, line, col) = self.consume_char()?;
+                toks.push(Token {
+                    kind: TokenKind::CharLit,
+                    lexeme: ch.to_string(),
+                    line,
+                    col,
+                });
+                continue;
+            }
+
             // operadores de 2 caracteres
             if let Some(tok) = self.try_two_char_op() {
                 toks.push(tok);
@@ -112,6 +124,12 @@ impl Lexer {
                 '/' => Token {
                     kind: TokenKind::Slash,
                     lexeme: "/".into(),
+                    line,
+                    col: sc,
+                },
+                '%' => Token {
+                    kind: TokenKind::Percent,
+                    lexeme: "%".into(),
                     line,
                     col: sc,
                 },
@@ -340,6 +358,49 @@ impl Lexer {
             }
         }
         Err(format!("String sin cerrar en linea {}", start_line))
+    }
+
+    fn consume_char(&mut self) -> Result<(char, usize, usize), String> {
+        let start_line = self.line;
+        let start_col = self.col;
+        // consume la comilla inicial '
+        self.next();
+
+        let ch = match self.peek(0) {
+            None => return Err(format!("Carácter vacío en línea {}", start_line)),
+            Some(c) if c == '\'' => return Err(format!("Carácter vacío en línea {}", start_line)),
+            Some(c) if c == '\\' => {
+                // escape
+                self.next(); // consume '\'
+                let e = self.next().ok_or_else(|| {
+                    format!("Escape incompleto en línea {}, col {}", self.line, self.col)
+                })?;
+                match e {
+                    'n' => '\n',
+                    't' => '\t',
+                    'r' => '\r',
+                    '\\' => '\\',
+                    '\'' => '\'',
+                    other => other,
+                }
+            }
+            Some(c) => {
+                self.next(); // consume el carácter
+                c
+            }
+        };
+
+        // debe cerrarse con '
+        match self.peek(0) {
+            Some('\'') => {
+                self.next(); // consume la comilla final
+                Ok((ch, start_line, start_col))
+            }
+            _ => Err(format!(
+                "Se esperaba ' para cerrar el carácter en línea {}",
+                start_line
+            )),
+        }
     }
 
     // intenta consumir operadores de 2 caracteres

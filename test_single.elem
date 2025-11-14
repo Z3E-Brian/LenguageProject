@@ -1,9 +1,0 @@
-!! Test simple con 1 iteracion cada uno
-chain 1 {
-    emit("Exterior - loop_1 = ", loop_1, "\n");
-    chain 1 {
-        emit("  Interior - loop_1 = ", loop_1, ", loop_2 = ", loop_2, "\n");
-    }
-}
-
-emit("=== Fin test ===\n");

@@ -15,6 +15,7 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "synthesize" => KwSynthesize,
         "chain" => KwChain,
         "to" => KwTo,
+        "orbite" => KwOrbite,
         // declaración
         "atom" => KwAtom,
         "molecule" => KwMolecule,
@@ -24,6 +25,8 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "atom_num" => KwAtomNum,
         "mass" => KwMass,
         "polarized" => KwPolarized,
+        "pos" => KwTrue,
+        "neg" => KwFalse,
         "voidstate" => KwVoidState, // case-insensitive
         "formula" => KwFormula,
         "ion" => KwIon,

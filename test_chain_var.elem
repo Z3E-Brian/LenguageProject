@@ -1,0 +1,9 @@
+!! Patrón de cuadrado 5x5
+ion TAMANO : atom_num = 5;
+
+chain 1 to TAMANO {
+    chain 1 to TAMANO {
+        emit("■ ");
+    }
+    emit("\n");
+}

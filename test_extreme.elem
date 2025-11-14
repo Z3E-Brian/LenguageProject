@@ -1,0 +1,531 @@
+!! ============================================
+!! TEST EXTREMO - LÍMITES Y CASOS COMPLEJOS
+!! ============================================
+
+emitln("=== INICIANDO TEST EXTREMO ===");
+emitln("");
+
+!! ============================================
+!! 1. BUCLES CON NÚMEROS GIGANTES
+!! ============================================
+emitln("1. TEST DE NÚMEROS GIGANTES");
+
+!! Número extremadamente grande (debería causar overflow o error)
+!! atom num_gigante : atom_num = 300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000;
+
+!! Número grande pero razonable
+atom num_grande : atom_num = 999999999;
+emitln("Número grande: ", num_grande);
+
+!! Número negativo extremo
+atom num_negativo : atom_num = -999999999;
+emitln("Número negativo: ", num_negativo);
+
+emitln("");
+
+!! ============================================
+!! 2. IF DENTRO DE FOR DENTRO DE IF DENTRO DE FOR
+!! ============================================
+emitln("2. ANIDAMIENTO EXTREMO: IF-FOR-IF-FOR");
+
+atom resultado_anidado : atom_num = 0;
+
+chain 1 to 3 {
+    emitln("Bucle externo, loop_1 = ", loop_1);
+    
+    itest (loop_1 > 0) {
+        emitln("  IF externo: loop_1 es positivo");
+        
+        chain 1 to 2 {
+            emitln("    Bucle interno, loop_2 = ", loop_2);
+            
+            itest (loop_2 == 1) {
+                emitln("      IF interno: loop_2 es 1");
+                resultado_anidado = resultado_anidado + (loop_1 * loop_2);
+            } inotest (loop_2 == 2) {
+                emitln("      IF interno: loop_2 es 2");
+                resultado_anidado = resultado_anidado + (loop_1 + loop_2);
+            } notest {
+                emitln("      IF interno: loop_2 es otro valor");
+            }
+        }
+    } notest {
+        emitln("  IF externo: loop_1 NO es positivo");
+    }
+}
+
+emitln("Resultado de anidamiento extremo: ", resultado_anidado);
+emitln("");
+
+!! ============================================
+!! 3. FUNCIONES CON BUCLES Y CONDICIONALES ANIDADOS
+!! ============================================
+emitln("3. FUNCIONES CON ANIDAMIENTO COMPLEJO");
+
+reaction funcion_compleja(param1: atom_num, param2: atom_num) : atom_num {
+    atom acumulador : atom_num = 0;
+    
+    emitln("  [FUNC] Iniciando con param1=", param1, ", param2=", param2);
+    
+    chain 1 to 5 {
+        itest (loop_1 <= param1) {
+            emitln("    [FUNC] loop_1=", loop_1, " <= param1");
+            
+            chain 1 to 3 {
+                itest (loop_2 <= param2) {
+                    emitln("      [FUNC] loop_2=", loop_2, " <= param2");
+                    acumulador = acumulador + (loop_1 * loop_2);
+                } notest {
+                    emitln("      [FUNC] loop_2=", loop_2, " > param2");
+                    acumulador = acumulador + 1;
+                }
+            }
+        } notest {
+            emitln("    [FUNC] loop_1=", loop_1, " > param1");
+        }
+    }
+    
+    emitln("  [FUNC] Retornando: ", acumulador);
+    release acumulador;
+}
+
+atom res1 : atom_num = funcion_compleja(3, 1);
+emitln("funcion_compleja(3, 1) = ", res1);
+
+atom res2 : atom_num = funcion_compleja(3, 3);
+emitln("funcion_compleja(3, 1) = ", res2);
+
+emitln("");
+
+!! ============================================
+!! 4. VERIFICACIÓN EXTREMA DE TIPOS
+!! ============================================
+emitln("4. VERIFICACIÓN DE TIPOS");
+
+!! Tipos básicos
+atom tipo_num : atom_num = 42;
+atom tipo_decimal : mass = 3.14159;
+atom tipo_texto : formula = "ElementScript";
+atom tipo_bool : polarized = pos;
+
+emitln("atom_num: ", tipo_num);
+emitln("mass: ", tipo_decimal);
+emitln("formula: ", tipo_texto);
+emitln("polarized: ", tipo_bool);
+
+!! Operaciones entre tipos compatibles
+atom suma_nums : atom_num = tipo_num + 10;
+emitln("Suma atom_num: ", suma_nums);
+
+atom concat_texto : formula = tipo_texto + " es genial!";
+emitln("Concatenación: ", concat_texto);
+
+emitln("");
+
+!! ============================================
+!! 5. FUNCIONES QUE LLAMAN A FUNCIONES
+!! ============================================
+emitln("5. FUNCIONES QUE LLAMAN A FUNCIONES");
+
+reaction multiplicar(a: atom_num, b: atom_num) : atom_num {
+    release a * b;
+}
+
+reaction sumar(a: atom_num, b: atom_num) : atom_num {
+    release a + b;
+}
+
+reaction operacion_compuesta(x: atom_num, y: atom_num, z: atom_num) : atom_num {
+    atom mult : atom_num = multiplicar(x, y);
+    atom resultado : atom_num = sumar(mult, z);
+    release resultado;
+}
+
+atom comp1 : atom_num = operacion_compuesta(3, 4, 5);
+emitln("operacion_compuesta(3, 4, 5) = ", comp1, " (esperado: 17)");
+
+emitln("");
+
+!! ============================================
+!! 6. RECURSIÓN SIMULADA CON BUCLES
+!! ============================================
+emitln("6. FIBONACCI CON BUCLES");
+
+reaction fibonacci(n: atom_num) : atom_num {
+    itest (n <= 1) {
+        release n;
+    }
+    
+    atom fib_prev : atom_num = 0;
+    atom fib_curr : atom_num = 1;
+    atom temp : atom_num = 0;
+    atom contador : atom_num = 2;
+    
+    chain 1 to 100 {
+        itest (loop_1 >= 2) {
+            itest (loop_1 <= n) {
+                temp = fib_curr;
+                fib_curr = fib_curr + fib_prev;
+                fib_prev = temp;
+                contador = contador + 1;
+            }
+        }
+    }
+    
+    release fib_curr;
+}
+
+atom fib5 : atom_num = fibonacci(5);
+emitln("fibonacci(5) = ", fib5, " (esperado: 5)");
+
+atom fib10 : atom_num = fibonacci(10);
+emitln("fibonacci(10) = ", fib10, " (esperado: 55)");
+
+emitln("");
+
+!! ============================================
+!! 7. BUCLES DESCENDENTES CON CONDICIONALES
+!! ============================================
+emitln("7. BUCLES DESCENDENTES COMPLEJOS");
+
+atom countdown_result : atom_num = 0;
+
+chain 10 to 1 {
+    itest (loop_1 > 5) {
+        emitln("  ", loop_1, " es mayor que 5");
+        countdown_result = countdown_result + loop_1;
+    } notest {
+        emitln("  ", loop_1, " es menor o igual a 5");
+        countdown_result = countdown_result - loop_1;
+    }
+}
+
+emitln("Resultado countdown: ", countdown_result);
+emitln("");
+
+!! ============================================
+!! 8. STRINGS COMPLEJOS Y CONCATENACIÓN
+!! ============================================
+emitln("8. MANIPULACIÓN AVANZADA DE STRINGS");
+
+atom str1 : formula = "Hola";
+atom str2 : formula = " ";
+atom str3 : formula = "Mundo";
+atom str4 : formula = "!";
+
+atom str_final : formula = str1 + str2 + str3 + str4;
+emitln("String concatenado: ", str_final);
+
+!! String con números
+atom num_en_str : atom_num = 42;
+atom str_con_num : formula = "La respuesta es: " + str_final;
+emitln(str_con_num);
+
+emitln("");
+
+!! ============================================
+!! 9. CONDICIONES COMPLEJAS CON MÚLTIPLES ELIF
+!! ============================================
+emitln("9. MÚLTIPLES CONDICIONES (IF-ELIF-ELSE)");
+
+reaction clasificar_numero(num: atom_num) : formula {
+    itest (num < 0) {
+        release "Negativo";
+    } inotest (num == 0) {
+        release "Cero";
+    } inotest (num <= 10) {
+        release "Pequeño (1-10)";
+    } inotest (num <= 50) {
+        release "Mediano (11-50)";
+    } inotest (num <= 100) {
+        release "Grande (51-100)";
+    } notest {
+        release "Muy grande (>100)";
+    }
+}
+
+atom clase1 : formula = clasificar_numero(-5);
+emitln("clasificar_numero(-5) = ", clase1);
+
+atom clase2 : formula = clasificar_numero(0);
+emitln("clasificar_numero(0) = ", clase2);
+
+atom clase3 : formula = clasificar_numero(7);
+emitln("clasificar_numero(7) = ", clase3);
+
+atom clase4 : formula = clasificar_numero(25);
+emitln("clasificar_numero(25) = ", clase4);
+
+atom clase5 : formula = clasificar_numero(75);
+emitln("clasificar_numero(75) = ", clase5);
+
+atom clase6 : formula = clasificar_numero(200);
+emitln("clasificar_numero(200) = ", clase6);
+
+emitln("");
+
+!! ============================================
+!! 10. OPERACIONES MATEMÁTICAS EXTREMAS
+!! ============================================
+emitln("10. OPERACIONES MATEMÁTICAS EXTREMAS");
+
+atom a : atom_num = 1000;
+atom b : atom_num = 999;
+
+atom suma_grande : atom_num = a + b;
+emitln("1000 + 999 = ", suma_grande);
+
+atom resta_casi_cero : atom_num = a - b;
+emitln("1000 - 999 = ", resta_casi_cero);
+
+atom mult_grande : atom_num = a * b;
+emitln("1000 * 999 = ", mult_grande);
+
+emitln("");
+
+!! ============================================
+!! 11. BUCLES CON MODIFICACIÓN DE VARIABLES EXTERNAS
+!! ============================================
+emitln("11. BUCLES MODIFICANDO VARIABLES EXTERNAS");
+
+atom var_externa : atom_num = 0;
+atom multiplicador : atom_num = 2;
+
+chain 1 to 5 {
+    var_externa = var_externa + (loop_1 * multiplicador);
+    emitln("  Iteración ", loop_1, ": var_externa = ", var_externa);
+}
+
+emitln("var_externa final: ", var_externa);
+emitln("");
+
+!! ============================================
+!! 12. FUNCIONES CON BOOLEANS COMPLEJOS
+!! ============================================
+emitln("12. FUNCIONES CON LÓGICA BOOLEANA");
+
+reaction es_primo_simple(n: atom_num) : polarized {
+    itest (n <= 1) {
+        release neg;
+    }
+    
+    itest (n == 2) {
+        release pos;
+    }
+    
+    itest (n % 2 == 0) {
+        release neg;
+    }
+    
+    !! Verificar divisores impares hasta 9
+    itest (n % 3 == 0) {
+        itest (n == 3) {
+            release pos;
+        } notest {
+            release neg;
+        }
+    }
+    
+    itest (n % 5 == 0) {
+        itest (n == 5) {
+            release pos;
+        } notest {
+            release neg;
+        }
+    }
+    
+    itest (n % 7 == 0) {
+        itest (n == 7) {
+            release pos;
+        } notest {
+            release neg;
+        }
+    }
+    
+    release pos;
+}
+
+atom primo2 : polarized = es_primo_simple(2);
+atom primo3 : polarized = es_primo_simple(3);
+atom primo4 : polarized = es_primo_simple(4);
+atom primo5 : polarized = es_primo_simple(5);
+atom primo7 : polarized = es_primo_simple(7);
+atom primo9 : polarized = es_primo_simple(9);
+
+itest (primo2) {
+    emitln("2 es primo si");
+}
+
+itest (primo3) {
+    emitln("3 es primo si");
+}
+
+itest (primo4) {
+    emitln("4 es primo (ERROR!)");
+} notest {
+    emitln("4 NO es primo si");
+}
+
+itest (primo5) {
+    emitln("5 es primo si");
+}
+
+itest (primo7) {
+    emitln("7 es primo si");
+}
+
+itest (primo9) {
+    emitln("9 es primo (ERROR!)");
+} notest {
+    emitln("9 NO es primo si");
+}
+
+emitln("");
+
+!! ============================================
+!! 13. CONSTANTES Y VARIABLES MEZCLADAS
+!! ============================================
+emitln("13. CONSTANTES Y VARIABLES");
+
+ion CONSTANTE_MAX : atom_num = 100;
+ion CONSTANTE_MIN : atom_num = 0;
+ion CONSTANTE_PI : mass = 3.14159;
+
+atom variable_dinamica : atom_num = 50;
+
+itest (variable_dinamica > CONSTANTE_MIN) {
+    itest (variable_dinamica < CONSTANTE_MAX) {
+        emitln("variable_dinamica está en rango [0, 100] si");
+    }
+}
+
+emitln("");
+
+!! ============================================
+!! 14. BUCLE CON TODAS LAS OPERACIONES
+!! ============================================
+emitln("14. BUCLE CON TODAS LAS OPERACIONES MATEMÁTICAS");
+
+chain 1 to 5 {
+    atom suma_op : atom_num = loop_1 + 10;
+    atom resta_op : atom_num = loop_1 - 1;
+    atom mult_op : atom_num = loop_1 * 3;
+    
+    emitln("loop_1=", loop_1, ": +10=", suma_op, ", -1=", resta_op, ", *3=", mult_op);
+}
+
+emitln("");
+
+!! ============================================
+!! 15. FUNCIÓN QUE RETORNA DIFERENTES TIPOS
+!! ============================================
+emitln("15. FUNCIONES CON DIFERENTES TIPOS DE RETORNO");
+
+reaction funcion_numero() : atom_num {
+    release 42;
+}
+
+reaction funcion_texto() : formula {
+    release "Texto de prueba";
+}
+
+reaction funcion_boolean() : polarized {
+    release pos;
+}
+
+reaction funcion_void() : void_state {
+    emitln("  Función void ejecutada");
+}
+
+atom fn1 : atom_num = funcion_numero();
+atom fn2 : formula = funcion_texto();
+atom fn3 : polarized = funcion_boolean();
+funcion_void();
+
+emitln("Retornos: ", fn1, ", ", fn2);
+
+emitln("");
+
+!! ============================================
+!! 16. ANIDAMIENTO EXTREMO: 3 NIVELES DE BUCLES
+!! ============================================
+emitln("16. ANIDAMIENTO DE 3 NIVELES DE BUCLES");
+
+atom triple_sum : atom_num = 0;
+
+chain 1 to 2 {
+    emitln("Nivel 1: loop_1=", loop_1);
+    
+    chain 1 to 2 {
+        emitln("  Nivel 2: loop_2=", loop_2);
+        
+        chain 1 to 2 {
+            emitln("    Nivel 3: loop_3=", loop_3);
+            triple_sum = triple_sum + (loop_1 + loop_2 + loop_3);
+        }
+    }
+}
+
+emitln("Suma triple anidada: ", triple_sum);
+emitln("");
+
+!! ============================================
+!! 17. ESTRÉS TEST: BUCLE GRANDE
+!! ============================================
+emitln("17. STRESS TEST: BUCLE DE 100 ITERACIONES");
+
+atom stress_count : atom_num = 0;
+atom stress_sum : atom_num = 0;
+
+chain 1 to 100 {
+    stress_count = stress_count + 1;
+    stress_sum = stress_sum + loop_1;
+}
+
+emitln("Conteo: ", stress_count);
+emitln("Suma 1-100: ", stress_sum, " (esperado: 5050)");
+
+emitln("");
+
+!! ============================================
+!! 18. COMPARACIONES EXTREMAS
+!! ============================================
+emitln("18. COMPARACIONES EXTREMAS");
+
+atom num1 : atom_num = 100;
+atom num2 : atom_num = 100;
+atom num3 : atom_num = 99;
+
+itest (num1 == num2) {
+    emitln("100 == 100 si");
+}
+
+itest (num1 != num3) {
+    emitln("100 != 99 si");
+}
+
+itest (num1 > num3) {
+    emitln("100 > 99 si");
+}
+
+itest (num1 >= num2) {
+    emitln("100 >= 100 si");
+}
+
+itest (num3 < num1) {
+    emitln("99 < 100 si");
+}
+
+itest (num3 <= num1) {
+    emitln("99 <= 100 si");
+}
+
+emitln("");
+
+!! ============================================
+!! FIN DEL TEST EXTREMO
+!! ============================================
+emitln("===========================================");
+emitln("=== TEST EXTREMO COMPLETADO ===");
+emitln("Si llegaste aquí, ¡EL LENGUAJE ES ROBUSTO!");
+emitln("===========================================");

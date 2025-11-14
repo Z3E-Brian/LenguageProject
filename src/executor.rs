@@ -20,6 +20,7 @@ pub struct Executor {
     output: String,                         // Salida del programa
     pc: usize,                              // Program counter (instruction pointer)
     call_stack: Vec<usize>,                 // Pila de llamadas (para funciones)
+    function_table: HashMap<String, usize>, // Tabla de funciones (nombre -> posición)
     loop_counter_stack: Vec<i32>,               // Stack de contadores [exterior -> interior]
     pub input_callback: Option<InputCallback>,  // Callback para entrada del usuario
     paused_for_input: bool,                 // Flag para indicar pausa por input
@@ -47,62 +48,58 @@ impl Executor {
     pub fn new() -> Self {
         Self {
             stack: Vec::new(),
-            variables: vec![HashMap::new()], // Iniciamos con un scope global
+            variables: vec![HashMap::new()], // scope global
             variable_types: HashMap::new(),
             output: String::new(),
             pc: 0,
             call_stack: Vec::new(),
+            function_table: HashMap::new(),
             loop_counter_stack: Vec::new(),
             input_callback: None,
             paused_for_input: false,
         }
     }
+    
+    pub fn register_function(&mut self, name: String, address: usize) {
+        self.function_table.insert(name, address);
+    }
 
-    // Registrar tipo de variable cuando se declara
     pub fn register_variable_type(&mut self, name: &str, ty: Ty) {
         self.variable_types.insert(name.to_string(), ty);
     }
 
-    // Obtener tipo de variable
     fn get_variable_type(&self, name: &str) -> Ty {
         self.variable_types.get(name).cloned().unwrap_or(Ty::Unknown)
     }
 
-    // Obtener el output actual
     pub fn get_output(&self) -> &str {
         &self.output
     }
 
-    // Almacenar valor capturado del usuario
     pub fn store_captured_value(&mut self, var_name: &str, value: Value) {
-        // Agregar el valor ingresado al output
         self.output.push_str(&format!("{}\n", value.to_string()));
         
-        // Buscar la variable en los scopes y actualizar su valor
         for scope in self.variables.iter_mut().rev() {
             if scope.contains_key(var_name) {
                 scope.insert(var_name.to_string(), value);
                 return;
             }
         }
-        // Si no existe, crearla en el scope actual
         if let Some(current_scope) = self.variables.last_mut() {
             current_scope.insert(var_name.to_string(), value);
         }
     }
 
-    // Ejecutar hasta encontrar una instrucción Capture o hasta terminar
     pub fn execute_until_capture(&mut self, instructions: &[Instruction]) -> Result<ExecutionStatus, ExecutionError> {
         self.paused_for_input = false;
         
         while self.pc < instructions.len() {
             let current_instruction = &instructions[self.pc];
             
-            // Si encontramos un Capture, pausar
             if let Instruction::Capture(var_name) = current_instruction {
                 self.output.push_str(&format!(">> Ingrese valor para '{}': ", var_name));
                 self.paused_for_input = true;
-                self.pc += 1; // Avanzar PC para la siguiente ejecución
+                self.pc += 1;
                 let var_type = self.get_variable_type(var_name);
                 return Ok(ExecutionStatus::WaitingForInput(var_name.clone(), var_type));
             }
@@ -110,15 +107,13 @@ impl Executor {
             match current_instruction {
                 Instruction::StartLoopCapture(initial, limit, ascending) => {
                     self.execute_loop_immediately_with_instructions(*initial, *limit, *ascending, instructions)?;
-                    // El PC ya fue actualizado dentro de la función del bucle
                 }
                 _ => {
                     match self.execute_instruction(current_instruction) {
-                        Ok(should_continue) => {
-                            if !should_continue {
-                                return Ok(ExecutionStatus::Finished);
+                        Ok(should_increment_pc) => {
+                            if should_increment_pc {
+                                self.pc += 1;
                             }
-                            self.pc += 1;
                         }
                         Err(e) => return Err(e),
                     }
@@ -129,7 +124,6 @@ impl Executor {
         Ok(ExecutionStatus::Finished)
     }
 
-    // Función principal: ejecutar todas las instrucciones
     pub fn execute(&mut self, instructions: &[Instruction]) -> Result<String, ExecutionError> {
         self.pc = 0;
         self.output.clear();
@@ -144,15 +138,13 @@ impl Executor {
             match current_instruction {
                 Instruction::StartLoopCapture(initial, limit, ascending) => {
                     self.execute_loop_immediately_with_instructions(*initial, *limit, *ascending, instructions)?;
-                    // El PC ya fue actualizado dentro de la función del bucle
                 }
                 _ => {
                     match self.execute_instruction(current_instruction) {
-                        Ok(should_continue) => {
-                            if !should_continue {
-                                break; // Return o halt
+                        Ok(should_increment_pc) => {
+                            if should_increment_pc {
+                                self.pc += 1;
                             }
-                            self.pc += 1; // Solo avanzar aquí para instrucciones normales
                         }
                         Err(e) => return Err(e),
                     }
@@ -162,17 +154,14 @@ impl Executor {
         Ok(())
     }
 
-    // Ejecutar una instrucción individual
     fn execute_instruction(&mut self, instruction: &Instruction) -> Result<bool, ExecutionError> {
         match instruction {
-            // ===== MANEJO DE VALORES =====
             Instruction::LoadConst(value) => {
                 self.stack.push(value.clone());
                 Ok(true)
             }
 
             Instruction::LoadVar(name) => {
-                // Buscar variable en scopes (desde el más reciente)
                 for scope in self.variables.iter().rev() {
                     if let Some(value) = scope.get(name) {
                         self.stack.push(value.clone());
@@ -187,9 +176,19 @@ impl Executor {
 
             Instruction::StoreVar(name) => {
                 if let Some(value) = self.stack.pop() {
-                    // Almacenar en el scope más reciente
-                    if let Some(current_scope) = self.variables.last_mut() {
-                        current_scope.insert(name.clone(), value);
+                    let mut found = false;
+                    for scope in self.variables.iter_mut().rev() {
+                        if scope.contains_key(name) {
+                            scope.insert(name.clone(), value.clone());
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if !found {
+                        if let Some(current_scope) = self.variables.last_mut() {
+                            current_scope.insert(name.clone(), value);
+                        }
                     }
                     Ok(true)
                 } else {
@@ -314,16 +313,16 @@ impl Executor {
             // ===== CONTROL DE FLUJO =====
             Instruction::Jump(target) => {
                 self.pc = *target;
-                Ok(false) // No incrementar PC automáticamente
+                Ok(false)
             }
 
             Instruction::JumpIfFalse(target) => {
                 if let Some(condition) = self.stack.pop() {
                     if !condition.is_truthy() {
                         self.pc = *target;
-                        Ok(false) // No incrementar PC automáticamente
+                        Ok(false)
                     } else {
-                        Ok(true) // Continuar normalmente
+                        Ok(true)
                     }
                 } else {
                     Err(ExecutionError {
@@ -337,9 +336,9 @@ impl Executor {
                 if let Some(condition) = self.stack.pop() {
                     if condition.is_truthy() {
                         self.pc = *target;
-                        Ok(false) // No incrementar PC automáticamente
+                        Ok(false)
                     } else {
-                        Ok(true) // Continuar normalmente
+                        Ok(true)
                     }
                 } else {
                     Err(ExecutionError {
@@ -357,7 +356,6 @@ impl Executor {
 
             Instruction::PopScope => {
                 if self.variables.len() > 1 {
-                    // Mantener al menos el scope global
                     self.variables.pop();
                 }
                 Ok(true)
@@ -367,7 +365,6 @@ impl Executor {
             Instruction::EmitLn(num_args) => {
                 let mut output_parts = Vec::new();
 
-                // Recoger argumentos del stack (en orden inverso)
                 for _ in 0..*num_args {
                     if let Some(value) = self.stack.pop() {
                         output_parts.push(value.to_string());
@@ -379,10 +376,8 @@ impl Executor {
                     }
                 }
 
-                // Invertir para obtener el orden correcto
                 output_parts.reverse();
 
-                // Agregar a la salida
                 for part in output_parts {
                     self.output.push_str(&part);
                 }
@@ -394,7 +389,6 @@ impl Executor {
             Instruction::Emit(num_args) => {
                 let mut output_parts = Vec::new();
 
-                // Recoger argumentos del stack (en orden inverso)
                 for _ in 0..*num_args {
                     if let Some(value) = self.stack.pop() {
                         output_parts.push(value.to_string());
@@ -406,10 +400,8 @@ impl Executor {
                     }
                 }
 
-                // Invertir para obtener el orden correcto
                 output_parts.reverse();
 
-                // Agregar a la salida (sin salto de línea)
                 for part in output_parts {
                     self.output.push_str(&part);
                 }
@@ -418,13 +410,10 @@ impl Executor {
             }
 
             Instruction::Capture(_var_name) => {
-                // Esta instrucción es manejada por execute_until_capture
-                // Si llegamos aquí es porque ya se procesó la entrada
                 Ok(true)
             }
 
             Instruction::RegisterVarType(name, ty) => {
-                // Registrar el tipo de la variable
                 self.register_variable_type(name, ty.clone());
                 Ok(true)
             }
@@ -448,7 +437,6 @@ impl Executor {
             }
 
             Instruction::StartLoopCapture(_, _, _) => {
-                // StartLoopCapture se maneja en execute_instructions, no aquí
                 Err(ExecutionError {
                     message: "StartLoopCapture debe ser manejado por execute_instructions".to_string(),
                     instruction_index: self.pc,
@@ -456,32 +444,39 @@ impl Executor {
             }
 
             Instruction::EndLoopCapture => {
-                // EndLoopCapture ya fue procesado por execute_loop_immediately
-                // Solo saltar esta instrucción
                 Ok(true)
             }
 
             // ===== LLAMADAS A FUNCIONES Y BUILTINS =====
             Instruction::Call(name, argc) => {
-                // Manejar funciones builtin para vectores y listas
                 if name.starts_with("__vec_") || name.starts_with("__list_") {
                     self.execute_builtin(name, *argc)?;
                     Ok(true)
                 } else {
-                    Err(ExecutionError {
-                        message: format!("Function '{}' not implemented yet", name),
-                        instruction_index: self.pc,
-                    })
+                    if let Some(&func_addr) = self.function_table.get(name) {
+                        self.call_stack.push(self.pc);
+                        
+                        self.pc = func_addr;
+                        Ok(true)
+                    } else {
+                        Err(ExecutionError {
+                            message: format!("Función '{}' no encontrada", name),
+                            instruction_index: self.pc,
+                        })
+                    }
                 }
             }
 
             Instruction::Return => {
-                // Por ahora, simplemente terminar ejecución
-                Ok(false)
+                if let Some(return_addr) = self.call_stack.pop() {
+                    self.pc = return_addr;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
             }
 
             Instruction::Label(_) => {
-                // Las etiquetas no se ejecutan, solo sirven de referencia
                 Ok(true)
             }
 
@@ -580,7 +575,7 @@ impl Executor {
                 }
                 Instruction::EndLoopCapture => {
                     if nested_count == 0 {
-                        break; // Encontramos nuestro EndLoopCapture
+                        break; // Encontramos EndLoopCapture
                     } else {
                         nested_count -= 1;
                     }
@@ -594,7 +589,6 @@ impl Executor {
         let mut counter = initial;
         
         while {
-            // Verificar condición de continuación
             if ascending {
                 counter <= limit
             } else {
@@ -606,19 +600,18 @@ impl Executor {
             self.setup_loop_variables();
             
             let saved_pc = self.pc;
-            self.pc = 0; // Reset PC para ejecutar el cuerpo
+            self.pc = 0;
             
             // Crear un ejecutor temporal para las instrucciones del cuerpo
             self.execute_body_slice(body_instructions)?;
             
-            self.pc = saved_pc; // Restaurar PC
+            self.pc = saved_pc;
             
             self.loop_counter_stack.pop();
             if self.variables.len() > 1 {
                 self.variables.pop();
             }
             
-            // Avanzar contador
             if ascending {
                 counter += 1;
             } else {
@@ -626,7 +619,6 @@ impl Executor {
             }
         }
         
-        // Posicionar PC después del EndLoopCapture
         self.pc = end_pc;
         
         Ok(())
@@ -641,12 +633,10 @@ impl Executor {
             
             match instruction {
                 Instruction::StartLoopCapture(initial, limit, ascending) => {
-                    // Bucle anidado: encontrar su cuerpo y ejecutarlo recursivamente
                     let start_idx = self.pc;
                     let mut end_idx = start_idx + 1;
                     let mut nested_count = 0;
                     
-                    // Encontrar el EndLoopCapture correspondiente
                     while end_idx < body_instructions.len() {
                         match &body_instructions[end_idx] {
                             Instruction::StartLoopCapture(_, _, _) => nested_count += 1,
@@ -661,7 +651,6 @@ impl Executor {
                     
                     let nested_body = &body_instructions[start_idx + 1..end_idx];
                     
-                    // Ejecutar el bucle anidado
                     let mut counter = *initial;
                     while {
                         if *ascending { counter <= *limit } else { counter >= *limit }
@@ -670,7 +659,6 @@ impl Executor {
                         self.variables.push(HashMap::new());
                         self.setup_loop_variables();
                         
-                        // 🔄 RECURSIÓN: ejecutar el cuerpo que puede contener más bucles
                         self.execute_body_slice(nested_body)?;
                         
                         self.loop_counter_stack.pop();
@@ -681,12 +669,9 @@ impl Executor {
                         if *ascending { counter += 1; } else { counter -= 1; }
                     }
                     
-                    // Saltar hasta después del EndLoopCapture
                     self.pc = end_idx;
                 }
                 Instruction::EndLoopCapture => {
-                    // EndLoopCapture ya fue manejado por el bucle padre
-                    // Solo avanzar
                 }
                 _ => {
                     match self.execute_instruction(instruction) {
@@ -712,7 +697,6 @@ impl Executor {
     }
     
     fn execute_nested_loop(&mut self, initial: i32, limit: i32, ascending: bool, parent_body: &[Instruction]) -> Result<(), ExecutionError> {
-        // Por ahora, implementación simple que encuentra el cuerpo del bucle anidado
         let start_pc = self.pc;
         let mut end_pc = start_pc + 1;
         let mut nested_count = 0;
@@ -731,7 +715,6 @@ impl Executor {
         
         let nested_body = &parent_body[start_pc + 1..end_pc];
         
-        // Ejecutar bucle anidado
         let mut counter = initial;
         while {
             if ascending { counter <= limit } else { counter >= limit }
@@ -740,7 +723,6 @@ impl Executor {
             self.variables.push(HashMap::new());
             self.setup_loop_variables();
             
-            // Ejecutar cuerpo del bucle anidado
             let saved_pc = self.pc;
             self.pc = 0;
             
@@ -750,7 +732,6 @@ impl Executor {
                 
                 match instruction {
                     Instruction::StartLoopCapture(inner_initial, inner_limit, inner_ascending) => {
-                        // Bucle doblemente anidado: encontrar su cuerpo y ejecutar
                         let inner_start = i;
                         let mut inner_end = i + 1;
                         let mut inner_nested = 0;
@@ -769,7 +750,6 @@ impl Executor {
                         
                         let inner_body = &nested_body[inner_start + 1..inner_end];
                         
-                        // Ejecutar el bucle interno
                         let mut inner_counter = *inner_initial;
                         while {
                             if *inner_ascending { inner_counter <= *inner_limit } else { inner_counter >= *inner_limit }
@@ -778,7 +758,6 @@ impl Executor {
                             self.variables.push(HashMap::new());
                             self.setup_loop_variables();
                             
-                            // Ejecutar instrucciones del bucle interno
                             for inner_instr in inner_body {
                                 if matches!(inner_instr, Instruction::EndLoopCapture) {
                                     continue;
@@ -797,12 +776,10 @@ impl Executor {
                             if *inner_ascending { inner_counter += 1; } else { inner_counter -= 1; }
                         }
                         
-                        // Saltar hasta después del EndLoopCapture del bucle interno
                         i = inner_end + 1;
                         continue;
                     }
                     Instruction::EndLoopCapture => {
-                        // Saltamos EndLoopCapture ya que fue procesado
                         i += 1;
                         continue;
                     }
@@ -835,7 +812,6 @@ impl Executor {
             if ascending { counter += 1; } else { counter -= 1; }
         }
         
-        // Posicionar después del EndLoopCapture del bucle anidado
         self.pc = end_pc;
         
         Ok(())
@@ -871,7 +847,7 @@ impl Executor {
                     }
                 }
                 
-                // Revertir orden (estaban en orden inverso en el stack)
+                // Revertir orden
                 elements.reverse();
                 
                 // Inferir tipo del primer elemento
@@ -880,7 +856,7 @@ impl Executor {
                         Value::Number(_) => Ty::AtomNum,
                         Value::String(_) => Ty::Formula,
                         Value::Bool(_) => Ty::Polarized,
-                        Value::Char(_) => Ty::Formula,
+                        Value::Char(_) => Ty::Symbol,
                         Value::Void => Ty::VoidState,
                         Value::Vector { elem, .. } => elem.clone(),
                         Value::List { elem, .. } => elem.clone(),
@@ -964,7 +940,7 @@ impl Executor {
                             });
                         }
                         data[idx] = element;
-                        self.stack.push(vector); // Devolver vector modificado
+                        self.stack.push(vector);
                         Ok(())
                     }
                     _ => Err(ExecutionError {
@@ -1009,7 +985,7 @@ impl Executor {
                         Value::Number(_) => Ty::AtomNum,
                         Value::String(_) => Ty::Formula,
                         Value::Bool(_) => Ty::Polarized,
-                        Value::Char(_) => Ty::Formula,
+                        Value::Char(_) => Ty::Symbol,
                         Value::Void => Ty::VoidState,
                         Value::Vector { elem, .. } => elem.clone(),
                         Value::List { elem, .. } => elem.clone(),

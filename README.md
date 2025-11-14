@@ -1,247 +1,315 @@
-# ElementScript Language 🔥
+# 📘 ElementScript — README Oficial
 
-Un lenguaje de programación diseñado para la manipulación de bucles y emisión de texto, con una sintaxis minimalista y expresiva.
+**ElementScript** es un lenguaje de programación interpretado con sintaxis inspirada en conceptos químicos.
+Cuenta con análisis léxico, parser Pratt, verificación semántica, generación de bytecode y ejecución mediante máquina virtual, además de un entorno gráfico (IDE) para pruebas interactivas.
 
-## 📋 Descripción
+Este README sirve como guía técnica completa del lenguaje y como documentación principal del repositorio.
 
-ElementScript es un lenguaje de programación interpretado que incluye:
-- **Analizador léxico** (Lexer)
-- **Analizador sintáctico** (Parser)
-- **Análisis semántico** completo
-- **Generador de código intermedio**
-- **Ejecutor de bytecode**
-- **Interfaz gráfica** (GUI) con egui/eframe
+---
 
-## 🚀 Características
+# 🚀 Características principales
 
-- ✨ Sintaxis simple y clara
-- 🔄 Bucles con la palabra clave `chain`
-- 📝 Emisión de texto con `emit()`
-- 🔢 Variables locales y arrays
-- 🎨 Interfaz gráfica integrada para escribir y ejecutar código
-- 💻 Soporte para línea de comandos
-- 🛡️ Análisis semántico robusto con detección de errores
+* 🔹 **Compilado a bytecode** mediante máquina virtual (VM)
+* 🔹 **Tipado estático**
+* 🔹 **Sintaxis inspirada en química**
+* 🔹 **Ámbitos anidados (scopes)**
+* 🔹 **Colecciones genéricas** (`solution<T>`, `sample<T>`)
+* 🔹 **Entrada interactiva** con `capture`
+* 🔹 **Errores con línea y columna**
+* 🔹 **IDE gráfico integrado**
 
-## 📦 Instalación
+---
 
-### Prerrequisitos
-- Rust 1.70 o superior
-- Cargo (incluido con Rust)
+# 🧬 Tipos de Datos
 
-### Clonar el repositorio
-```bash
-git clone https://github.com/Z3E-Brian/LenguageProject.git
-cd LenguageProject
-```
+## Tipos primitivos
 
-### Compilar el proyecto
-```bash
-cargo build --release
-```
+| Clásico     | ElementScript | Ejemplo      |
+| ----------- | ------------- | ------------ |
+| int         | `atom_num`    | `3`          |
+| float       | `mass`        | `3.14`       |
+| string      | `formula`     | `"hola"`     |
+| char        | `symbol`      | `'A'`        |
+| bool        | `polarized`   | `pos`, `neg` |
+| void/null   | `VoidState`   | `VoidState`  |
 
-## 🎮 Uso
+## Tipos compuestos
 
-### Modo GUI (Interfaz Gráfica)
-Ejecuta el programa sin argumentos para abrir la interfaz gráfica:
+* `solution<T>` → vector dinámico
+* `sample<T>` → lista dinámica
 
-```bash
-cargo run
-```
-
-### Modo CLI (Línea de Comandos)
-Ejecuta un archivo `.elem` directamente:
-
-```bash
-cargo run -- archivo.elem
-```
-
-O con el ejecutable compilado:
-
-```bash
-./target/release/LenguageProject archivo.elem
-```
-
-## 📝 Sintaxis de ElementScript
-
-### Estructura básica
+Ejemplos:
 
 ```elementscript
-!! Esto es un comentario
-
-!! Emisión de texto
-emit("Hola, mundo!\n");
-
-!! Bucles (chain)
-chain 3 {
-    emit("Iteración: ", loop_1, "\n");
-}
-
-!! Bucles anidados
-chain 2 {
-    emit("Nivel 1: ", loop_1, "\n");
-    chain 3 {
-        emit("  Nivel 2: ", loop_1, ", ", loop_2, "\n");
-    }
-}
+atom edad : atom_num = 20;
+atom saludo : formula = "Hola";
+atom inicial : symbol = 'A';
+atom activo : polarized = pos;
 ```
 
-### Variables
+---
+
+# 🔧 Declaración de Variables
+
+### Variables mutables — `atom`
 
 ```elementscript
-!! Declaración de variables
-int x = 10;
-str nombre = "ElementScript";
-
-!! Uso de variables
-emit("El valor de x es: ", x, "\n");
+atom contador : atom_num = 0;
+contador = contador + 1;
 ```
 
-### Arrays
+### Constantes — `ion`
 
 ```elementscript
-!! Declaración de arrays
-int[5] numeros;
+ion PI : mass = 3.14159;
+PI = 4.0;      !! ERROR: no se puede reasignar
+```
 
-!! Asignación
-numeros[0] = 100;
-numeros[1] = 200;
+---
 
-!! Uso en bucles
-chain 5 {
-    numeros[loop_1 - 1] = loop_1 * 10;
+# ➕ Operadores
+
+### Aritméticos
+
+`+`, `-`, `*`, `/`, `%`
+
+### Comparación
+
+`==`, `!=`, `<`, `<=`, `>`, `>=`
+
+### Lógicos
+
+`and`, `or`, `not`
+
+Ejemplo:
+
+```elementscript
+pos and neg
+not pos
+```
+
+---
+
+# 🔀 Estructuras de Control
+
+## Condicionales (`itest`, `inotest`, `notest`)
+
+```elementscript
+itest (edad > 18) {
+    emitln("Adulto");
+} inotest (edad == 18) {
+    emitln("Justo 18");
+} notest {
+    emitln("Menor de edad");
 }
 ```
 
-### Palabras clave
+---
 
-- `chain` - Define un bucle
-- `emit` - Emite texto a la salida
-- `int` - Tipo de dato entero
-- `str` - Tipo de dato cadena
-- `loop_N` - Variable automática para el índice del bucle N (empezando desde 1)
+# 🔁 Bucles
 
-## 📁 Estructura del Proyecto
+### 1. `chain N` → Repetir N veces
 
-```
-LenguageProject/
-├── src/
-│   ├── main.rs          # Punto de entrada y pipeline de compilación
-│   ├── lexer.rs         # Análisis léxico
-│   ├── parser.rs        # Análisis sintáctico
-│   ├── semantics.rs     # Análisis semántico
-│   ├── codegen.rs       # Generador de código intermedio
-│   ├── executor.rs      # Ejecutor de bytecode
-│   ├── gui.rs           # Interfaz gráfica
-│   └── utils/           # Utilidades (tokens, enums, etc.)
-├── test_*.elem          # Archivos de prueba
-├── Cargo.toml           # Configuración del proyecto
-└── README.md            # Este archivo
-```
-
-## 🔧 Pipeline de Compilación
-
-El proceso de compilación y ejecución sigue estos pasos:
-
-1. **Análisis Léxico** - Convierte el código fuente en tokens
-2. **Análisis Sintáctico** - Genera el AST (Abstract Syntax Tree)
-3. **Análisis Semántico** - Verifica tipos, variables y reglas semánticas
-4. **Generación de Código** - Produce código intermedio (bytecode)
-5. **Ejecución** - Interpreta y ejecuta el bytecode
-
-## 📊 Ejemplos
-
-### Ejemplo 1: Hola Mundo
-```elementscript
-emit("Hola, ElementScript!\n");
-```
-
-### Ejemplo 2: Tabla de Multiplicar
-```elementscript
-chain 10 {
-    chain 10 {
-        int resultado = loop_1 * loop_2;
-        emit(loop_1, " x ", loop_2, " = ", resultado, "\n");
-    }
-}
-```
-
-### Ejemplo 3: Pirámide de Asteriscos
 ```elementscript
 chain 5 {
-    chain loop_1 {
-        emit("*");
+    emitln(chain.count());
+}
+```
+
+### 2. `chain A to B`
+
+```elementscript
+chain 1 to 5 {
+    emitln(chain.count());
+}
+```
+
+### 3. Descendente
+
+```elementscript
+chain 5 to 1 {
+    emitln(chain.count());
+}
+```
+
+### 4. Estilo while (implementado en tu compilador)
+
+```elementscript
+atom i : atom_num = 0;
+chain i < 5 > loop {
+    emitln(i);
+    i = i + 1;
+}
+```
+
+---
+
+# 🧪 Funciones (reaction)
+
+Declaración:
+
+```elementscript
+reaction sumar(a : atom_num, b : atom_num) : atom_num {
+    release a + b;
+}
+```
+
+Uso:
+
+```elementscript
+atom r : atom_num = sumar(3, 4);
+emitln(r);
+```
+
+---
+
+# 📦 Colecciones
+
+## solution<T> — vector dinámico
+
+```elementscript
+atom numeros : solution<atom_num> = [1, 2, 3];
+
+numeros.push(10);
+numeros.insert(1, 99);
+numeros.remove(0);
+
+emitln(numeros[0]);
+emitln(numeros);
+```
+
+## sample<T> — lista dinámica
+
+```elementscript
+atom nombres : sample<formula> = ["Ana", "Luis"];
+
+nombres.push_front("Zoe");
+nombres.push_back("Carlos");
+
+emitln(nombres[0]);
+```
+
+---
+
+# ⌨ Entrada / Salida
+
+## Salida
+
+```elementscript
+emit("Hola ");
+emitln("mundo");
+emitln("Resultado: ", 10);
+```
+
+## Entrada
+
+```elementscript
+atom nombre : formula;
+capture nombre : formula;
+
+emitln("Hola ", nombre);
+```
+
+---
+
+# 📝 Comentarios
+
+```elementscript
+!! Comentario de una línea
+```
+
+---
+
+# ⚠ Errores comunes y soluciones
+
+### ❌ Reasignar un `ion`
+
+```elementscript
+ion x : atom_num = 5;
+x = 10;     !! ERROR
+```
+
+### ❌ Usar variables en `chain`
+
+```elementscript
+ion N : atom_num = 5;
+chain N { }    !! ERROR
+```
+
+Solución:
+
+```elementscript
+chain 5 { ... }               !! fijo
+chain i < N > whileLoop { ... }  !! estilo while
+```
+
+### ❌ Índice fuera de rango
+
+```elementscript
+emitln(numeros[99]);   !! runtime error
+```
+
+### ❌ Tipos incompatibles
+
+```elementscript
+atom x : formula = "hola";
+atom y : atom_num = x + 5;    !! ERROR
+```
+
+---
+
+# 🧩 Ejemplos Completos
+
+## Cuadrado 5×5 con `chain`
+
+```elementscript
+chain 1 to 5 {
+    chain 1 to 5 {
+        emit("■ ");
     }
     emit("\n");
 }
 ```
 
-## 🧪 Pruebas
+## Factorial
 
-El proyecto incluye varios archivos de prueba:
+```elementscript
+reaction factorial(n : atom_num) : atom_num {
+    itest (n <= 1) {
+        release 1;
+    } notest {
+        release n * factorial(n - 1);
+    }
+}
 
-- `test_simple.elem` - Prueba de bucles anidados básicos
-- `test_single.elem` - Prueba de bucle simple
-- `test_3_niveles.elem` - Prueba de bucles de 3 niveles
-- `test_simple_no_nested.elem` - Prueba sin anidamiento
-- `test_bucle_problema.elem` - Casos de prueba específicos
-
-Ejecuta las pruebas con:
-```bash
-cargo run -- test_simple.elem
+atom r : atom_num = factorial(5);
+emitln("5! = ", r);
 ```
-
-## 🛠️ Desarrollo
-
-### Compilar en modo debug
-```bash
-cargo build
-```
-
-### Ejecutar con logs
-```bash
-cargo run -- archivo.elem
-```
-
-### Verificar el código
-```bash
-cargo check
-cargo clippy
-```
-
-## 📜 Licencia
-
-Este proyecto está bajo la licencia MIT. Consulta el archivo LICENSE para más detalles.
-
-## 👤 Autor
-
-**Brian Zeledón**
-- GitHub: [@Z3E-Brian](https://github.com/Z3E-Brian)
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-1. Haz fork del proyecto
-2. Crea una rama para tu característica (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
-
-## 📚 Recursos Adicionales
-
-- [Documentación de Rust](https://www.rust-lang.org/learn)
-- [egui Framework](https://github.com/emilk/egui)
-- [eframe](https://github.com/emilk/egui/tree/master/crates/eframe)
-
-## 🗺️ Roadmap
-
-- [ ] Soporte para funciones personalizadas
-- [ ] Operaciones aritméticas más complejas
-- [ ] Estructuras de control adicionales (if/else, while)
-- [ ] Sistema de módulos
-- [ ] Exportación a otros formatos
-- [ ] REPL interactivo
-- [ ] Depurador integrado
 
 ---
 
-⭐ Si te gusta este proyecto, ¡dale una estrella en GitHub!
+# 🏗 Arquitectura Interna
+
+ElementScript se compone de las siguientes etapas:
+
+1. **Lexer** — Convierte texto → tokens
+2. **Parser (Pratt)** — tokens → AST
+3. **Analyzer** — Verifica tipos, constantes, ámbito
+4. **Codegen** — AST → bytecode
+5. **Executor** — máquina virtual que ejecuta bytecode
+6. **GUI** — entorno de pruebas en tiempo real
+
+---
+
+# 🧑‍💻 Repositorio
+
+**GitHub:** `Z3E-Brian/LenguageProject`
+**Branch principal de desarrollo:** `develop`
+
+---
+
+# 📅 Información
+
+* **Última actualización:** Noviembre 2025
+
+---
