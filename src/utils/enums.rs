@@ -30,10 +30,14 @@ pub enum TokenKind {
     And,
     Or,
     Not,
+    // boolean literals
+    KwTrue,
+    KwFalse,
     // general
     Ident,
     Number,
     StringLit,
+    CharLit,
     // operators / signs
     Assign,
     Plus,
@@ -84,6 +88,9 @@ pub enum Stmt {
 pub enum Expr {
     LitNumber(String),
     LitString(String),
+    LitChar(char),
+    LitTrue,
+    LitFalse,
     Ident(String),
     Unary { op: TokenKind, rhs: Box<Expr> },
     Binary { lhs: Box<Expr>, op: TokenKind, rhs: Box<Expr> },
@@ -181,6 +188,7 @@ pub enum Ty {
     Mass,       // float
     Polarized,  // bool
     Formula,    // string
+    Symbol,     // char
     VoidState,  // void/null
     Unknown,    // tipo desconocido (para no abortar al 1er error)
     Function(Vec<Ty>, Box<Ty>), // params, retorno

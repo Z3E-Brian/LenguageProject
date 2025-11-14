@@ -37,7 +37,7 @@ impl CodeGenerator {
             TypeName::VoidState => Ty::VoidState,
             TypeName::Solution(inner) => Ty::Solution(Box::new(self.typename_to_ty(inner))),
             TypeName::Sample(inner) => Ty::Sample(Box::new(self.typename_to_ty(inner))),
-            TypeName::Symbol => Ty::Unknown, // Not fully implemented
+            TypeName::Symbol => Ty::Symbol,
             TypeName::Ion => Ty::Unknown,    // Not fully implemented
             TypeName::Custom(_) => Ty::Unknown, // Not fully implemented
         }
@@ -232,6 +232,21 @@ impl CodeGenerator {
             
             Expr::LitString(s) => {
                 self.emit(Instruction::LoadConst(Value::String(s.clone())));
+                Ok(())
+            }
+            
+            Expr::LitTrue => {
+                self.emit(Instruction::LoadConst(Value::Bool(true)));
+                Ok(())
+            }
+            
+            Expr::LitFalse => {
+                self.emit(Instruction::LoadConst(Value::Bool(false)));
+                Ok(())
+            }
+            
+            Expr::LitChar(ch) => {
+                self.emit(Instruction::LoadConst(Value::Char(*ch)));
                 Ok(())
             }
             
@@ -491,7 +506,7 @@ impl std::fmt::Display for Value {
         match self {
             Value::Number(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
-            Value::Bool(b) => write!(f, "{}", b),
+            Value::Bool(b) => write!(f, "{}", if *b { "pos" } else { "neg" }),
             Value::Char(c) => write!(f, "{}", c),
             Value::Void => write!(f, "void"),
             Value::Vector { data, .. } => {
@@ -540,7 +555,7 @@ impl Value {
                 }
             }
             Value::String(s) => s.clone(),
-            Value::Bool(b) => b.to_string(),
+            Value::Bool(b) => if *b { "pos".to_string() } else { "neg".to_string() },
             Value::Char(c) => c.to_string(),
             Value::Void => "void".to_string(),
             Value::Vector { data, .. } => {

@@ -195,8 +195,9 @@ impl IDE {
                                             let type_str = match &self.input_var_type {
                                                 crate::utils::enums::Ty::AtomNum => "int",
                                                 crate::utils::enums::Ty::Mass => "double",
-                                                crate::utils::enums::Ty::Polarized => "bool",
+                                                crate::utils::enums::Ty::Polarized => "pos/neg",
                                                 crate::utils::enums::Ty::Formula => "string",
+                                                crate::utils::enums::Ty::Symbol => "char",
                                                 _ => "value",
                                             };
 
@@ -392,13 +393,59 @@ impl IDE {
                     }
                 }
                 crate::utils::enums::Ty::Polarized => {
-                    // Debe ser true o false
-                    if input_text.eq_ignore_ascii_case("true") {
+                    // Debe ser pos o neg
+                    if input_text.eq_ignore_ascii_case("pos") {
                         Ok(crate::utils::enums::Value::Bool(true))
-                    } else if input_text.eq_ignore_ascii_case("false") {
+                    } else if input_text.eq_ignore_ascii_case("neg") {
                         Ok(crate::utils::enums::Value::Bool(false))
                     } else {
                         Err(format!("❌ Error de tipo: '{}'", self.input_var_name))
+                    }
+                }
+                crate::utils::enums::Ty::Symbol => {
+                    // Debe ser exactamente un carácter, o un carácter entre comillas simples 'a'
+                    let trimmed = input_text.trim();
+                    
+                    // Si está vacío, error
+                    if trimmed.is_empty() {
+                        Err(format!("❌ Error de tipo: '{}' (entrada vacía, se esperaba un carácter)", self.input_var_name))
+                    }
+                    // Verificar si está entre comillas simples
+                    else if trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+                        if trimmed.len() < 3 {
+                            // Es '' (vacío)
+                            Err(format!("❌ Error de tipo: '{}' (carácter vacío '')", self.input_var_name))
+                        } else {
+                            let inner = &trimmed[1..trimmed.len()-1];
+                            
+                            // Manejar escapes como \n, \t, etc.
+                            if inner.starts_with('\\') && inner.len() == 2 {
+                                match inner.chars().nth(1) {
+                                    Some('n') => Ok(crate::utils::enums::Value::Char('\n')),
+                                    Some('t') => Ok(crate::utils::enums::Value::Char('\t')),
+                                    Some('r') => Ok(crate::utils::enums::Value::Char('\r')),
+                                    Some('\\') => Ok(crate::utils::enums::Value::Char('\\')),
+                                    Some('\'') => Ok(crate::utils::enums::Value::Char('\'')),
+                                    Some(c) => Ok(crate::utils::enums::Value::Char(c)),
+                                    None => Err(format!("❌ Error de tipo: '{}' (escape inválido)", self.input_var_name)),
+                                }
+                            } else {
+                                let chars: Vec<char> = inner.chars().collect();
+                                if chars.len() == 1 {
+                                    Ok(crate::utils::enums::Value::Char(chars[0]))
+                                } else {
+                                    Err(format!("❌ Error de tipo: '{}' (se esperaba un solo carácter entre comillas simples)", self.input_var_name))
+                                }
+                            }
+                        }
+                    } else {
+                        // Sin comillas, debe ser un solo carácter
+                        let chars: Vec<char> = trimmed.chars().collect();
+                        if chars.len() == 1 {
+                            Ok(crate::utils::enums::Value::Char(chars[0]))
+                        } else {
+                            Err(format!("❌ Error de tipo: '{}' (se esperaba un solo carácter o 'c')", self.input_var_name))
+                        }
                     }
                 }
                 crate::utils::enums::Ty::Formula => {
@@ -409,9 +456,9 @@ impl IDE {
                     // Para tipos desconocidos, intentar parsear como número o usar como string
                     if let Ok(num) = input_text.parse::<f64>() {
                         Ok(crate::utils::enums::Value::Number(num))
-                    } else if input_text.eq_ignore_ascii_case("true") {
+                    } else if input_text.eq_ignore_ascii_case("pos") {
                         Ok(crate::utils::enums::Value::Bool(true))
-                    } else if input_text.eq_ignore_ascii_case("false") {
+                    } else if input_text.eq_ignore_ascii_case("neg") {
                         Ok(crate::utils::enums::Value::Bool(false))
                     } else {
                         Ok(crate::utils::enums::Value::String(self.input_buffer.trim().to_string()))

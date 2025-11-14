@@ -22,6 +22,9 @@ impl fmt::Display for Expr {
         match self {
             Expr::LitNumber(s) => write!(f, "{s}"),
             Expr::LitString(s) => write!(f, "\"{s}\""),
+            Expr::LitChar(c) => write!(f, "'{c}'"),
+            Expr::LitTrue => write!(f, "pos"),
+            Expr::LitFalse => write!(f, "neg"),
             Expr::Ident(id) => write!(f, "{id}"),
             Expr::Unary { op, rhs } => write!(f, "({:?} {})", op, rhs),
             Expr::Binary { lhs, op, rhs } => write!(f, "({} {:?} {})", lhs, op, rhs),
@@ -531,6 +534,12 @@ impl Parser {
         match t.kind {
             Number => Ok(Expr::LitNumber(t.lexeme)),
             StringLit => Ok(Expr::LitString(t.lexeme)),
+            CharLit => {
+                let ch = t.lexeme.chars().next().unwrap_or('\0');
+                Ok(Expr::LitChar(ch))
+            }
+            KwTrue => Ok(Expr::LitTrue),
+            KwFalse => Ok(Expr::LitFalse),
             Ident => Ok(Expr::Ident(t.lexeme)),
             LParen => {
                 let e = self.parse_expr(0)?;

@@ -365,6 +365,8 @@ impl<'a> SemanticPass<'a> {
                 if s.contains('.') { Ty::Mass } else { Ty::AtomNum }
             }
             Expr::LitString(_) => Ty::Formula,
+            Expr::LitTrue | Expr::LitFalse => Ty::Polarized,
+            Expr::LitChar(_) => Ty::Symbol,
             Expr::Ident(name) => {
                 match self.ctx.lookup(name) {
                     Some(sym) => sym.ty.clone(),
@@ -403,8 +405,6 @@ impl<'a> SemanticPass<'a> {
             Expr::MethodCall { receiver, name, args } => {
                 self.type_of_solution_method(receiver, name, args)
             }
-            // Si tienes más variantes de Expr, añádelas aquí
-            _ => Ty::Unknown,
         }
     }
 
@@ -506,7 +506,7 @@ impl<'a> SemanticPass<'a> {
             TypeName::Polarized => Ty::Polarized,
             TypeName::VoidState => Ty::VoidState,
             TypeName::Formula => Ty::Formula,
-            TypeName::Symbol => Ty::Formula, 
+            TypeName::Symbol => Ty::Symbol, 
             TypeName::Ion => Ty::Mass,       
             TypeName::Custom(name) => {
                 // Para tipos custom, busca en la tabla de símbolos o usa Unknown

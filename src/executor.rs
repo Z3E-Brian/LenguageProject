@@ -114,11 +114,11 @@ impl Executor {
                 }
                 _ => {
                     match self.execute_instruction(current_instruction) {
-                        Ok(should_continue) => {
-                            if !should_continue {
-                                return Ok(ExecutionStatus::Finished);
+                        Ok(should_increment_pc) => {
+                            if should_increment_pc {
+                                self.pc += 1;
                             }
-                            self.pc += 1;
+                            // Si es false, el PC ya fue modificado por Jump/JumpIfFalse/JumpIfTrue
                         }
                         Err(e) => return Err(e),
                     }
@@ -148,11 +148,11 @@ impl Executor {
                 }
                 _ => {
                     match self.execute_instruction(current_instruction) {
-                        Ok(should_continue) => {
-                            if !should_continue {
-                                break; // Return o halt
+                        Ok(should_increment_pc) => {
+                            if should_increment_pc {
+                                self.pc += 1; // Incrementar PC para instrucciones normales
                             }
-                            self.pc += 1; // Solo avanzar aquí para instrucciones normales
+                            // Si es false, el PC ya fue modificado por Jump/JumpIfFalse/JumpIfTrue
                         }
                         Err(e) => return Err(e),
                     }
@@ -880,7 +880,7 @@ impl Executor {
                         Value::Number(_) => Ty::AtomNum,
                         Value::String(_) => Ty::Formula,
                         Value::Bool(_) => Ty::Polarized,
-                        Value::Char(_) => Ty::Formula,
+                        Value::Char(_) => Ty::Symbol,
                         Value::Void => Ty::VoidState,
                         Value::Vector { elem, .. } => elem.clone(),
                         Value::List { elem, .. } => elem.clone(),
@@ -1009,7 +1009,7 @@ impl Executor {
                         Value::Number(_) => Ty::AtomNum,
                         Value::String(_) => Ty::Formula,
                         Value::Bool(_) => Ty::Polarized,
-                        Value::Char(_) => Ty::Formula,
+                        Value::Char(_) => Ty::Symbol,
                         Value::Void => Ty::VoidState,
                         Value::Vector { elem, .. } => elem.clone(),
                         Value::List { elem, .. } => elem.clone(),
