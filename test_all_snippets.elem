@@ -1,0 +1,295 @@
+!! ====================================
+!! TEST COMPLETO DE TODOS LOS SNIPPETS
+!! ====================================
+
+emit("=== PRUEBA DE SNIPPETS ===\n\n");
+
+!! ==================
+!! 1. DECLARACIONES
+!! ==================
+emit("1. DECLARACIONES\n");
+
+!! Variables básicas
+atom numero : atom_num = 42;
+atom decimal : mass = 3.14159;
+atom texto : formula = "Hola Mundo";
+atom booleano : polarized = pos;
+
+!! Constantes
+ion PI : mass = 3.14159;
+ion MAX : atom_num = 100;
+
+emitln("✓ Variables declaradas correctamente");
+emitln("");
+
+!! ==================
+!! 2. CONTROL DE FLUJO
+!! ==================
+emit("2. CONTROL DE FLUJO\n");
+
+!! If simple
+itest (numero > 0) {
+    emitln("✓ If simple funciona");
+}
+
+!! If-else
+itest (booleano) {
+    emitln("✓ If-else funciona (verdadero)");
+} notest {
+    emitln("✗ If-else no funciona");
+}
+
+!! If-elseif-else
+itest (numero > 100) {
+    emitln("✗ Número mayor a 100");
+} inotest (numero > 0) {
+    emitln("✓ If-elseif-else funciona (número entre 1-100)");
+} notest {
+    emitln("✗ Número menor o igual a 0");
+}
+
+emitln("");
+
+!! ==================
+!! 3. BUCLES BÁSICOS
+!! ==================
+emit("3. BUCLES BÁSICOS\n");
+
+emit("Bucle simple (0-2): ");
+chain 3 {
+    emit(loop_1, " ");
+}
+emit("\n");
+
+emit("Bucle ascendente (5-8): ");
+chain 5 to 8 {
+    emit(loop_1, " ");
+}
+emit("\n");
+
+emit("Bucle descendente (10-7): ");
+chain 10 to 7 {
+    emit(loop_1, " ");
+}
+emit("\n");
+
+emitln("✓ Bucles básicos funcionan");
+emitln("");
+
+!! ==================
+!! 4. BUCLES CON MATEMÁTICAS
+!! ==================
+emit("4. BUCLES CON MATEMÁTICAS\n");
+
+emit("Tabla del 3: ");
+chain 1 to 5 {
+    atom resultado : atom_num = 3 * loop_1;
+    emit(resultado, " ");
+}
+emit("\n");
+
+emit("Cuadrados (1-5): ");
+chain 1 to 5 {
+    atom cuadrado : atom_num = loop_1 * loop_1;
+    emit(cuadrado, " ");
+}
+emit("\n");
+
+emitln("✓ Bucles con matemáticas funcionan");
+emitln("");
+
+!! ==================
+!! 5. FUNCIONES BÁSICAS
+!! ==================
+emit("5. FUNCIONES BÁSICAS\n");
+
+!! Función sin retorno
+reaction saludar_void() : void_state {
+    emitln("✓ Función void_state ejecutada");
+}
+
+!! Función que retorna número
+reaction sumar(a: atom_num, b: atom_num) : atom_num {
+    release a + b;
+}
+
+!! Función que retorna texto
+reaction crear_saludo(nombre: formula) : formula {
+    release "Hola, " + nombre + "!";
+}
+
+!! Función que retorna booleano
+reaction es_positivo(num: atom_num) : polarized {
+    itest (num > 0) {
+        release pos;
+    } notest {
+        release neg;
+    }
+}
+
+!! Probar funciones
+saludar_void();
+
+atom suma : atom_num = sumar(10, 20);
+emitln("sumar(10, 20) = ", suma);
+
+atom saludo : formula = crear_saludo("Usuario");
+emitln(saludo);
+
+atom check : polarized = es_positivo(42);
+itest (check) {
+    emitln("✓ 42 es positivo");
+}
+
+emitln("");
+
+!! ==================
+!! 6. FUNCIONES AVANZADAS
+!! ==================
+emit("6. FUNCIONES AVANZADAS\n");
+
+!! Factorial con parámetro (ahora funciona!)
+reaction factorial_n(n: atom_num) : atom_num {
+    atom resultado : atom_num = 1;
+    atom contador : atom_num = 0;
+    chain 1 to 100 {
+        itest (loop_1 <= n) {
+            resultado = resultado * loop_1;
+            contador = contador + 1;
+        }
+    }
+    release resultado;
+}
+
+atom fact5 : atom_num = factorial_n(5);
+emitln("factorial(5) = ", fact5);
+
+atom fact7 : atom_num = factorial_n(7);
+emitln("factorial(7) = ", fact7);
+
+!! Potencia con parámetros (ahora funciona!)
+reaction potencia(base: atom_num, exponente: atom_num) : atom_num {
+    atom resultado : atom_num = 1;
+    atom contador : atom_num = 0;
+    chain 1 to 100 {
+        itest (loop_1 <= exponente) {
+            resultado = resultado * base;
+            contador = contador + 1;
+        }
+    }
+    release resultado;
+}
+
+atom pot1 : atom_num = potencia(2, 8);
+emitln("potencia(2, 8) = ", pot1);
+
+atom pot2 : atom_num = potencia(3, 4);
+emitln("potencia(3, 4) = ", pot2);
+
+!! Máximo
+reaction maximo(a: atom_num, b: atom_num) : atom_num {
+    itest (a > b) {
+        release a;
+    } notest {
+        release b;
+    }
+}
+
+atom max_val : atom_num = maximo(15, 25);
+emitln("maximo(15, 25) = ", max_val);
+
+!! Valor absoluto
+reaction abs(num: atom_num) : atom_num {
+    itest (num < 0) {
+        release num * -1;
+    } notest {
+        release num;
+    }
+}
+
+atom abs_val : atom_num = abs(-42);
+emitln("abs(-42) = ", abs_val);
+
+emitln("✓ Funciones avanzadas funcionan");
+emitln("");
+
+!! ==================
+!! 7. OPERACIONES LÓGICAS
+!! ==================
+emit("7. OPERACIONES LÓGICAS\n");
+
+atom a : atom_num = 10;
+atom b : atom_num = 5;
+
+itest (a > b) {
+    emitln("✓ Comparación > funciona");
+}
+
+itest (a >= b) {
+    emitln("✓ Comparación >= funciona");
+}
+
+!! AND lógico con if anidado
+itest (a > 0) {
+    itest (b > 0) {
+        emitln("✓ Ambos son positivos (AND simulado)");
+    }
+}
+
+!! OR lógico con variables auxiliares
+atom cond1 : polarized = neg;
+atom cond2 : polarized = neg;
+
+itest (a > 100) {
+    cond1 = pos;
+}
+itest (b > 0) {
+    cond2 = pos;
+}
+
+itest (cond1) {
+    emitln("✓ Al menos uno cumple (OR simulado)");
+} inotest (cond2) {
+    emitln("✓ Al menos uno cumple (OR simulado)");
+}
+
+emitln("");
+
+!! ==================
+!! 8. MANEJO DE STRINGS
+!! ==================
+emit("8. MANEJO DE STRINGS\n");
+
+atom nombre : formula = "Element";
+atom apellido : formula = "Script";
+atom nombre_completo : formula = nombre + " " + apellido;
+
+emitln("Nombre completo: ", nombre_completo);
+emitln("✓ Concatenación de strings funciona");
+emitln("");
+
+!! ==================
+!! 9. PATRONES DE BUCLES
+!! ==================
+emit("9. PATRONES DE BUCLES\n");
+
+emit("Triángulo usando loop_1:\n");
+chain 1 to 5 {
+    atom contador : atom_num = 0;
+    chain 1 to 10 {
+        itest (loop_2 <= loop_1) {
+            emit("* ");
+            contador = contador + 1;
+        }
+    }
+    emit("\n");
+}
+
+emitln("✓ Patrones de bucles funcionan");
+emitln("");
+
+!! ==================
+!! FIN DE PRUEBAS
+!! ==================
+emitln("=== TODAS LAS PRUEBAS COMPLETADAS ===");
+emitln("✓ Todos los snippets funcionan correctamente");

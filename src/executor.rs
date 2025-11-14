@@ -20,6 +20,7 @@ pub struct Executor {
     output: String,                         // Salida del programa
     pc: usize,                              // Program counter (instruction pointer)
     call_stack: Vec<usize>,                 // Pila de llamadas (para funciones)
+    function_table: HashMap<String, usize>, // Tabla de funciones (nombre -> posición)
     loop_counter_stack: Vec<i32>,               // Stack de contadores [exterior -> interior]
     pub input_callback: Option<InputCallback>,  // Callback para entrada del usuario
     paused_for_input: bool,                 // Flag para indicar pausa por input
@@ -52,10 +53,16 @@ impl Executor {
             output: String::new(),
             pc: 0,
             call_stack: Vec::new(),
+            function_table: HashMap::new(),
             loop_counter_stack: Vec::new(),
             input_callback: None,
             paused_for_input: false,
         }
+    }
+    
+    // Registrar función en la tabla de funciones
+    pub fn register_function(&mut self, name: String, address: usize) {
+        self.function_table.insert(name, address);
     }
 
     // Registrar tipo de variable cuando se declara
@@ -187,9 +194,22 @@ impl Executor {
 
             Instruction::StoreVar(name) => {
                 if let Some(value) = self.stack.pop() {
-                    // Almacenar en el scope más reciente
-                    if let Some(current_scope) = self.variables.last_mut() {
-                        current_scope.insert(name.clone(), value);
+                    // Buscar la variable en todos los scopes (de más reciente a más antiguo)
+                    // Si existe, actualizar en ese scope; si no, crear en el scope actual
+                    let mut found = false;
+                    for scope in self.variables.iter_mut().rev() {
+                        if scope.contains_key(name) {
+                            scope.insert(name.clone(), value.clone());
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    // Si no se encontró en ningún scope, crear en el scope más reciente
+                    if !found {
+                        if let Some(current_scope) = self.variables.last_mut() {
+                            current_scope.insert(name.clone(), value);
+                        }
                     }
                     Ok(true)
                 } else {
@@ -468,16 +488,33 @@ impl Executor {
                     self.execute_builtin(name, *argc)?;
                     Ok(true)
                 } else {
-                    Err(ExecutionError {
-                        message: format!("Function '{}' not implemented yet", name),
-                        instruction_index: self.pc,
-                    })
+                    // Llamada a función definida por el usuario
+                    if let Some(&func_addr) = self.function_table.get(name) {
+                        // Guardar el PC actual para retornar después
+                        self.call_stack.push(self.pc);
+                        
+                        // Saltar al inicio de la función
+                        self.pc = func_addr;
+                        Ok(true)
+                    } else {
+                        Err(ExecutionError {
+                            message: format!("Función '{}' no encontrada", name),
+                            instruction_index: self.pc,
+                        })
+                    }
                 }
             }
 
             Instruction::Return => {
-                // Por ahora, simplemente terminar ejecución
-                Ok(false)
+                // Verificar si hay algo para retornar
+                if let Some(return_addr) = self.call_stack.pop() {
+                    // Retornar al punto de llamada
+                    self.pc = return_addr;
+                    Ok(true)
+                } else {
+                    // Return desde el programa principal - terminar ejecución
+                    Ok(false)
+                }
             }
 
             Instruction::Label(_) => {

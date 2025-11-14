@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use crate::utils::enums::{Expr, Stmt, TypeName, Block, Ty};
 use crate::utils::enums::TokenKind;
-
+use crate::utils::enums::{Block, Expr, Stmt, Ty, TypeName};
 
 // ---------------- Símbolos / Ámbitos / Errores ---------------- //
 #[derive(Debug, Clone)]
@@ -21,7 +20,6 @@ pub struct SemError {
 }
 // ---------------- Simbolos / Ámbitos / Errores ---------------- //
 
-
 // -- Pila de ambitos (para variables locales y globales) y guardado de errores -- //
 type Scope = HashMap<String, Symbol>;
 
@@ -32,62 +30,75 @@ pub struct SemCtx {
 
 impl SemCtx {
     pub fn new() -> Self {
-        Self { scopes: vec![Scope::new()], errors: vec![] }
+        Self {
+            scopes: vec![Scope::new()],
+            errors: vec![],
+        }
     }
-    
-    fn push_scope(&mut self) { self.scopes.push(Scope::new()); }
-    
-    fn pop_scope(&mut self) { self.scopes.pop(); }
-    
+
+    fn push_scope(&mut self) {
+        self.scopes.push(Scope::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
     fn declare(&mut self, sym: Symbol) {
         let top = self.scopes.last_mut().unwrap();
         if top.contains_key(&sym.name) {
-            self.error(format!("Símbolo duplicado: {}", sym.name), 0, 0); // TODO: agregar span al parser
+            self.error(format!("Símbolo duplicado: {}", sym.name), 0, 0);
         } else {
             top.insert(sym.name.clone(), sym);
         }
     }
-    
+
     fn lookup(&self, name: &str) -> Option<&Symbol> {
         for s in self.scopes.iter().rev() {
-            if let Some(sym) = s.get(name) { return Some(sym); }
+            if let Some(sym) = s.get(name) {
+                return Some(sym);
+            }
         }
         None
     }
-    
+
     fn error<S: Into<String>>(&mut self, msg: S, line: usize, col: usize) {
-        self.errors.push(SemError { msg: msg.into(), line, col });
+        self.errors.push(SemError {
+            msg: msg.into(),
+            line,
+            col,
+        });
     }
 }
 
-
-// ------------------ Entorno por función (reaction) -----------------
 #[derive(Debug, Clone)]
-struct FnEnv {ret: Ty}// tipo de retorno esperado
+struct FnEnv {
+    ret: Ty,
+}
 
 // ---------------------- Pase semántico -----------------------------
 pub struct SemanticPass<'a> {
     ctx: &'a mut SemCtx,
     fn_stack: Vec<FnEnv>,
-    loop_nesting_level: usize,  // Nivel de anidamiento de bucles
+    loop_nesting_level: usize,
 }
 
 impl<'a> SemanticPass<'a> {
     pub fn new(ctx: &'a mut SemCtx) -> Self {
-        Self { ctx, fn_stack: vec![], loop_nesting_level: 0 }
+        Self {
+            ctx,
+            fn_stack: vec![],
+            loop_nesting_level: 0,
+        }
     }
 
-    // 🔧 HELPER: Obtener nombre de variable para nivel de bucle
     fn get_loop_variable_name(level: usize) -> String {
-        // Generar variables loop_1, loop_2, loop_3, ... (1-indexed desde exterior)
         format!("loop_{}", level + 1)
     }
 
     fn enter_loop_scope(&mut self) {
         self.ctx.push_scope();
 
-        // Declarar todas las variables de bucles padre + la del bucle actual
-        // Si estábamos en nivel k (0 para “ningún bucle”), declaramos loop_1..loop_{k+1}
         for level in 0..=self.loop_nesting_level {
             let loop_var_name = Self::get_loop_variable_name(level);
             self.ctx.declare(Symbol {
@@ -98,22 +109,28 @@ impl<'a> SemanticPass<'a> {
             });
         }
 
-        // Ahora sí, aumentamos el nivel (para que los bucles hijos vean una más)
         self.loop_nesting_level += 1;
     }
 
     fn exit_loop_scope(&mut self) {
-        // Decrementar nivel y cerrar el scope del bucle
         self.loop_nesting_level = self.loop_nesting_level.saturating_sub(1);
         self.ctx.pop_scope();
     }
 
-    // -- Encargado de crear el contexto y chequear todo el programa -- //
     pub fn check_program(&mut self, program: &Block) {
         for stmt in program {
-            if let Stmt::ReactionDecl { name, params, .. } = stmt {
-                let param_tys = params.iter().map(|(_, ty)| self.map_typename_to_ty(ty)).collect();
-                let ret = Ty::VoidState; // Asumimos void por ahora
+            if let Stmt::ReactionDecl {
+                name,
+                params,
+                return_type,
+                ..
+            } = stmt
+            {
+                let param_tys = params
+                    .iter()
+                    .map(|(_, ty)| self.map_typename_to_ty(ty))
+                    .collect();
+                let ret = self.map_typename_to_ty(return_type);
                 self.ctx.declare(Symbol {
                     name: name.clone(),
                     ty: Ty::Function(param_tys, Box::new(ret)),
@@ -128,62 +145,59 @@ impl<'a> SemanticPass<'a> {
         }
     }
 
-    // -- Plato principal: chequea cada statement y expresión -- //
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
-            // atom x : T = expr?;
-
-            Stmt::Chain { start, end, body } => {
-                match (start, end) {
-                    // ➤ chain N {}
-                    (Some(n), None) => {
-                        if *n < 0 {
-                            self.ctx.error("El conteo de chain debe ser ≥ 0", 0, 0);
-                            return;
-                        }
-                        // N==0: no ejecutará; igual revisamos el cuerpo para tipos/símbolos
-                        self.enter_loop_scope();
-                        self.check_block(body);
-                        self.exit_loop_scope();
+            Stmt::Chain { start, end, body } => match (start, end) {
+                (Some(n), None) => {
+                    if *n < 0 {
+                        self.ctx.error("El conteo de chain debe ser ≥ 0", 0, 0);
+                        return;
                     }
+                    self.enter_loop_scope();
+                    self.check_block(body);
+                    self.exit_loop_scope();
+                }
 
-                    // ➤ chain A to B {}
-                    (Some(_a), Some(_b)) => {
-                        // No restringimos signo ni orden: A..=B puede ser asc/desc/igual
-                        // Revisamos el cuerpo en un scope de bucle
-                        self.enter_loop_scope();
-                        self.check_block(body);
-                        self.exit_loop_scope();
-                    }
+                (Some(_a), Some(_b)) => {
+                    self.enter_loop_scope();
+                    self.check_block(body);
+                    self.exit_loop_scope();
+                }
 
-                    // ➤ inválido (p.ej. None/Some o None/None)
-                    _ => {
+                _ => {
+                    self.ctx
+                        .error("Chain inválido: use `chain N {}` o `chain A to B {}`", 0, 0);
+                }
+            },
+
+            Stmt::Orbite { condition, body } => {
+                let cty = self.check_expr(condition);
+                if cty != Ty::Polarized && cty != Ty::Unknown {
+                    self.ctx.error("orbite requiere condición polarized (bool)", 0, 0);
+                }
+                self.ctx.push_scope();
+                self.check_block(body);
+                self.ctx.pop_scope();
+            }
+
+            Stmt::VarDecl { name, ty, init, .. } => {
+                let init_ty = if let Some(e) = init {
+                    self.check_expr(e)
+                } else {
+                    Ty::Unknown
+                };
+
+                let declared_ty = self.map_typename_to_ty(ty);
+
+                if init.is_some() {
+                    if !self.compat(&declared_ty, &init_ty) {
                         self.ctx.error(
-                            "Chain inválido: use `chain N {}` o `chain A to B {}`",
+                            format!("Tipo incompatible en inicialización de '{}': se esperaba {:?}, obtuviste {:?}", name, declared_ty, init_ty),
                             0, 0
                         );
                     }
                 }
-            }
 
-            Stmt::VarDecl { name, ty, init, .. } => {
-                let init_ty = if let Some(e) = init { 
-                    self.check_expr(e) 
-                } else { 
-                    Ty::Unknown 
-                };
-                
-                let declared_ty = self.map_typename_to_ty(ty);
-                
-                if let Some(e) = init {
-                    if !self.compat(&declared_ty, &init_ty) {
-                        self.ctx.error(
-                            format!("Tipo incompatible en inicialización de '{}': se esperaba {:?}, obtuviste {:?}", name, declared_ty, init_ty),
-                            0, 0 // TODO: agregar span
-                        );
-                    }
-                }
-                
                 self.ctx.declare(Symbol {
                     name: name.clone(),
                     ty: declared_ty,
@@ -193,17 +207,23 @@ impl<'a> SemanticPass<'a> {
             }
 
             // ion C : T = expr;
-            Stmt::ConstDecl { name, ty, value, .. } => {
+            Stmt::ConstDecl {
+                name, ty, value, ..
+            } => {
                 let vty = self.check_expr(value);
                 let declared_ty = self.map_typename_to_ty(ty);
-                
+
                 if !self.compat(&declared_ty, &vty) {
                     self.ctx.error(
-                        format!("Const '{}' con tipo incompatible: se esperaba {:?}, obtuviste {:?}", name, declared_ty, vty),
-                        0, 0 // TODO: agregar span
+                        format!(
+                            "Const '{}' con tipo incompatible: se esperaba {:?}, obtuviste {:?}",
+                            name, declared_ty, vty
+                        ),
+                        0,
+                        0,
                     );
                 }
-                
+
                 self.ctx.declare(Symbol {
                     name: name.clone(),
                     ty: declared_ty,
@@ -215,54 +235,69 @@ impl<'a> SemanticPass<'a> {
             // x = expr;
             Stmt::Assign { name, value, .. } => {
                 let vty = self.check_expr(value);
-                match self.ctx.lookup(name) {
+                let sym_opt = self.ctx.lookup(name).cloned();
+                match sym_opt {
                     Some(sym) => {
                         if sym.is_const || !sym.mutable {
-                            //self.ctx.error(format!("'{}' es constante y no puede reasignarse", name), 0, 0);
+                            self.ctx.error(
+                                format!("'{}' es constante y no puede reasignarse", name),
+                                0,
+                                0,
+                            );
                         }
                         if !self.compat(&sym.ty, &vty) {
                             self.ctx.error(
-                                format!("Asignación incompatible a '{}': {:?} ← {:?}", name, sym.ty, vty),
-                                0, 0 // TODO: agregar span
+                                format!(
+                                    "Asignación incompatible a '{}': {:?} ← {:?}",
+                                    name, sym.ty, vty
+                                ),
+                                0,
+                                0,
                             );
                         }
                     }
-                    None => self.ctx.error(format!("Símbolo no declarado: '{}'", name), 0, 0),
+                    None => self
+                        .ctx
+                        .error(format!("Símbolo no declarado: '{}'", name), 0, 0),
                 }
             }
 
-            // emit/emitln (args...);
+            // emit/emitln
             Stmt::EmitLn(args) | Stmt::Emit(args) => {
-                // Verificamos que cada argumento sea válido
-                // Los argumentos pueden ser de cualquier tipo ya que se convertirán a string
                 for arg in args {
                     self.check_expr(arg);
                 }
             }
 
-            // capture(variable_name);
+            // capture
             Stmt::Capture { var_name } => {
-                // Verificar que la variable existe
                 if self.ctx.lookup(var_name).is_none() {
-                    self.ctx.error(format!("Variable '{}' no declarada para capture", var_name), 0, 0);
+                    self.ctx.error(
+                        format!("Variable '{}' no declarada para capture", var_name),
+                        0,
+                        0,
+                    );
                 }
             }
 
             // itest (cond) { ... } notest { ... }
-            Stmt::If { arms, else_block, .. } => {
+            Stmt::If {
+                arms, else_block, ..
+            } => {
                 for (cond, _) in arms {
                     let cty = self.check_expr(cond);
                     if cty == Ty::Unknown || cty != Ty::Polarized {
-                        self.ctx.error("itest requiere condición polarized (bool)", 0, 0);
+                        self.ctx
+                            .error("itest requiere condición polarized (bool)", 0, 0);
                     }
                 }
-                
+
                 self.ctx.push_scope();
                 for (_, then_blk) in arms {
                     self.check_block(then_blk);
                 }
                 self.ctx.pop_scope();
-                
+
                 if let Some(else_blk) = else_block {
                     self.ctx.push_scope();
                     self.check_block(else_blk);
@@ -270,9 +305,17 @@ impl<'a> SemanticPass<'a> {
                 }
             }
 
-            // reaction f(params...) { body }
-            Stmt::ReactionDecl { params, body, .. } => {
-                self.fn_stack.push(FnEnv { ret: Ty::VoidState });
+            // reaction
+            Stmt::ReactionDecl {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                let ret_ty = self.map_typename_to_ty(return_type);
+                self.fn_stack.push(FnEnv {
+                    ret: ret_ty.clone(),
+                });
 
                 self.ctx.push_scope();
                 for (pname, pty) in params {
@@ -290,6 +333,30 @@ impl<'a> SemanticPass<'a> {
                 self.fn_stack.pop();
             }
 
+            // release expr;
+            Stmt::Release(expr) => {
+                let expr_ty = self.check_expr(expr);
+
+                if let Some(fn_env) = self.fn_stack.last() {
+                    if !self.compat(&fn_env.ret, &expr_ty) {
+                        self.ctx.error(
+                            format!(
+                                "Tipo de retorno incompatible: se esperaba {:?}, obtuviste {:?}",
+                                fn_env.ret, expr_ty
+                            ),
+                            0,
+                            0,
+                        );
+                    }
+                } else {
+                    self.ctx.error(
+                        "'release' solo puede usarse dentro de una función".to_string(),
+                        0,
+                        0,
+                    );
+                }
+            }
+
             // { ... }
             Stmt::Block(b) => {
                 self.ctx.push_scope();
@@ -297,57 +364,8 @@ impl<'a> SemanticPass<'a> {
                 self.ctx.pop_scope();
             }
 
-            // Expresión statement
             Stmt::ExprStmt(expr) => {
                 self.check_expr(expr); // Solo verificar la expresión
-            }
-
-            // chain N {} o chain N to M {}
-            Stmt::Chain { start, end, body } => {
-                // Verificar que los valores sean válidos si están presentes
-                if let Some(s) = start {
-                    if *s < 0 {
-                        self.ctx.error(
-                            "El valor inicial del chain debe ser positivo".to_string(),
-                            0, 0
-                        );
-                    }
-                }
-                
-                if let Some(e) = end {
-                    if *e < 0 {
-                        self.ctx.error(
-                            "El valor final del chain debe ser positivo".to_string(),
-                            0, 0
-                        );
-                    }
-                    
-                    // No hay restricción en la relación entre start y end
-                    // Los bucles pueden ser ascendentes (2 to 5) o descendentes (5 to 2)
-                }
-                
-                // Verificar el cuerpo del bucle en un nuevo scope
-                self.ctx.push_scope();
-                
-                // 🎯 AGREGAR TODAS LAS VARIABLES loop_N DISPONIBLES
-                // Agregar variables de todos los bucles padre (loop_1, loop_2, ...)
-                for level in 0..=self.loop_nesting_level {
-                    let loop_var_name = Self::get_loop_variable_name(level);
-                    let loop_var = Symbol {
-                        name: loop_var_name,
-                        ty: Ty::AtomNum,
-                        is_const: true,  // Las variables de bucle son de solo lectura
-                        mutable: false,
-                    };
-                    self.ctx.declare(loop_var);
-                }
-                
-                // Incrementar nivel para bucles anidados
-                self.loop_nesting_level += 1;
-                self.check_block(body);
-                self.loop_nesting_level -= 1;
-                
-                self.ctx.pop_scope();
             }
         }
     }
@@ -362,20 +380,23 @@ impl<'a> SemanticPass<'a> {
         match e {
             // Literales
             Expr::LitNumber(s) => {
-                if s.contains('.') { Ty::Mass } else { Ty::AtomNum }
+                if s.contains('.') {
+                    Ty::Mass
+                } else {
+                    Ty::AtomNum
+                }
             }
             Expr::LitString(_) => Ty::Formula,
             Expr::LitTrue | Expr::LitFalse => Ty::Polarized,
             Expr::LitChar(_) => Ty::Symbol,
-            Expr::Ident(name) => {
-                match self.ctx.lookup(name) {
-                    Some(sym) => sym.ty.clone(),
-                    None => { 
-                        self.ctx.error(format!("Ident no declarado: '{}'", name), 0, 0); 
-                        Ty::Unknown 
-                    }
+            Expr::Ident(name) => match self.ctx.lookup(name) {
+                Some(sym) => sym.ty.clone(),
+                None => {
+                    self.ctx
+                        .error(format!("Ident no declarado: '{}'", name), 0, 0);
+                    Ty::Unknown
                 }
-            }
+            },
 
             // Unario
             Expr::Unary { op, rhs } => {
@@ -390,31 +411,72 @@ impl<'a> SemanticPass<'a> {
                 self.binary_type(op, lt, rt)
             }
 
-            Expr::VecLiteral(items) => {
-                self.type_of_vec_literal(items)
-            }
-            
-            Expr::ListLiteral(items) => {
-                self.type_of_list_literal(items)
-            }
+            Expr::VecLiteral(items) => self.type_of_vec_literal(items),
 
-            Expr::Index { target, index } => {
-                self.type_of_index(target, index)
-            }
+            Expr::ListLiteral(items) => self.type_of_list_literal(items),
 
-            Expr::MethodCall { receiver, name, args } => {
-                self.type_of_solution_method(receiver, name, args)
-            }
+            Expr::Index { target, index } => self.type_of_index(target, index),
+
+            Expr::MethodCall {
+                receiver,
+                name,
+                args,
+            } => self.type_of_solution_method(receiver, name, args),
+
+            Expr::FunctionCall { name, args } => match self.ctx.lookup(name) {
+                Some(sym) => {
+                    if let Ty::Function(param_tys, ret_ty) = sym.ty.clone() {
+                        if args.len() != param_tys.len() {
+                            self.ctx.error(
+                                format!(
+                                    "Función '{}' espera {} argumentos, recibió {}",
+                                    name,
+                                    param_tys.len(),
+                                    args.len()
+                                ),
+                                0,
+                                0,
+                            );
+                            return Ty::Unknown;
+                        }
+
+                        for (i, (arg, expected_ty)) in args.iter().zip(param_tys.iter()).enumerate()
+                        {
+                            let arg_ty = self.check_expr(arg);
+                            if !self.compat(&expected_ty, &arg_ty) {
+                                self.ctx.error(
+                                        format!("Argumento {} de '{}': tipo incompatible (esperado {:?}, recibido {:?})", 
+                                            i + 1, name, expected_ty, arg_ty),
+                                        0, 0
+                                    );
+                            }
+                        }
+
+                        (*ret_ty).clone()
+                    } else {
+                        self.ctx
+                            .error(format!("'{}' no es una función", name), 0, 0);
+                        Ty::Unknown
+                    }
+                }
+                None => {
+                    self.ctx
+                        .error(format!("Función '{}' no declarada", name), 0, 0);
+                    Ty::Unknown
+                }
+            },
         }
     }
 
-    // Compatibilidad un poco estricta:
     fn compat(&self, expected: &Ty, got: &Ty) -> bool {
-        if expected == got { return true; }
-        if matches!(got, Ty::Unknown) { return true; }
+        if expected == got {
+            return true;
+        }
+        if matches!(got, Ty::Unknown) {
+            return true;
+        }
 
         match (expected, got) {
-            // promoción implícita int -> float
             (Ty::Mass, Ty::AtomNum) => true,
             (Ty::Solution(te), Ty::Solution(tg)) => self.compat(te, tg),
             (Ty::Sample(te), Ty::Sample(tg)) => self.compat(te, tg),
@@ -427,24 +489,28 @@ impl<'a> SemanticPass<'a> {
     fn unary_type(&mut self, op: &TokenKind, rt: Ty) -> Ty {
         match op {
             TokenKind::Not => {
-                if rt == Ty::Polarized { Ty::Polarized }
-                else { 
-                    self.ctx.error("Operador 'not' requiere polarized (bool)", 0, 0);
-                    Ty::Unknown 
+                if rt == Ty::Polarized {
+                    Ty::Polarized
+                } else {
+                    self.ctx
+                        .error("Operador 'not' requiere polarized (bool)", 0, 0);
+                    Ty::Unknown
                 }
             }
             TokenKind::Minus => {
-                if rt == Ty::AtomNum || rt == Ty::Mass { rt }
-                else { 
+                if rt == Ty::AtomNum || rt == Ty::Mass {
+                    rt
+                } else {
                     self.ctx.error("Operador '-' requiere número", 0, 0);
-                    Ty::Unknown 
+                    Ty::Unknown
                 }
             }
             TokenKind::Plus => {
-                if rt == Ty::AtomNum || rt == Ty::Mass { rt }
-                else { 
+                if rt == Ty::AtomNum || rt == Ty::Mass {
+                    rt
+                } else {
                     self.ctx.error("Operador '+' unario requiere número", 0, 0);
-                    Ty::Unknown 
+                    Ty::Unknown
                 }
             }
             _ => {
@@ -457,39 +523,43 @@ impl<'a> SemanticPass<'a> {
     fn binary_type(&mut self, op: &TokenKind, lt: Ty, rt: Ty) -> Ty {
         use TokenKind::*;
         match op {
-            Plus => {
-                match (&lt, &rt) {
-                    (Ty::Formula, Ty::Formula) => Ty::Formula,                       // "a" + "b"
-                    (Ty::AtomNum, Ty::AtomNum) => Ty::AtomNum,                       // 1 + 2
-                    (Ty::Mass, Ty::Mass) | (Ty::Mass, Ty::AtomNum) | (Ty::AtomNum, Ty::Mass) => Ty::Mass, // float + int, etc.
-                    _ => { 
-                        self.ctx.error("Suma con tipos incompatibles", 0, 0); 
-                        Ty::Unknown 
-                    }
+            Plus => match (&lt, &rt) {
+                (Ty::Formula, Ty::Formula) => Ty::Formula,
+                (Ty::AtomNum, Ty::AtomNum) => Ty::AtomNum,
+                (Ty::Mass, Ty::Mass) | (Ty::Mass, Ty::AtomNum) | (Ty::AtomNum, Ty::Mass) => {
+                    Ty::Mass
                 }
-            }
-            Minus | Star | Slash => {
-                match (&lt, &rt) {
-                    (Ty::AtomNum, Ty::AtomNum) => Ty::AtomNum,
-                    (Ty::Mass, Ty::Mass) | (Ty::Mass, Ty::AtomNum) | (Ty::AtomNum, Ty::Mass) => Ty::Mass,
-                    _ => { 
-                        self.ctx.error("Operación aritmética con tipos incompatibles", 0, 0); 
-                        Ty::Unknown 
-                    }
+                _ => {
+                    self.ctx.error("Suma con tipos incompatibles", 0, 0);
+                    Ty::Unknown
                 }
-            }
+            },
+            Minus | Star | Slash | Percent => match (&lt, &rt) {
+                (Ty::AtomNum, Ty::AtomNum) => Ty::AtomNum,
+                (Ty::Mass, Ty::Mass) | (Ty::Mass, Ty::AtomNum) | (Ty::AtomNum, Ty::Mass) => {
+                    Ty::Mass
+                }
+                _ => {
+                    self.ctx
+                        .error("Operación aritmética con tipos incompatibles", 0, 0);
+                    Ty::Unknown
+                }
+            },
             And | Or => {
-                if lt == Ty::Polarized && rt == Ty::Polarized { Ty::Polarized }
-                else { 
-                    self.ctx.error("and/or requieren polarized (bool)", 0, 0); 
-                    Ty::Unknown 
+                if lt == Ty::Polarized && rt == Ty::Polarized {
+                    Ty::Polarized
+                } else {
+                    self.ctx.error("and/or requieren polarized (bool)", 0, 0);
+                    Ty::Unknown
                 }
             }
             Eq | Ne | Lt | Le | Gt | Ge => {
-                if self.compat(&lt, &rt) { Ty::Polarized }
-                else { 
-                    self.ctx.error("Comparación entre tipos incompatibles", 0, 0); 
-                    Ty::Unknown 
+                if self.compat(&lt, &rt) {
+                    Ty::Polarized
+                } else {
+                    self.ctx
+                        .error("Comparación entre tipos incompatibles", 0, 0);
+                    Ty::Unknown
                 }
             }
             _ => {
@@ -506,83 +576,88 @@ impl<'a> SemanticPass<'a> {
             TypeName::Polarized => Ty::Polarized,
             TypeName::VoidState => Ty::VoidState,
             TypeName::Formula => Ty::Formula,
-            TypeName::Symbol => Ty::Symbol, 
-            TypeName::Ion => Ty::Mass,       
-            TypeName::Custom(name) => {
-                // Para tipos custom, busca en la tabla de símbolos o usa Unknown
-                match self.ctx.lookup(name) {
-                    Some(sym) => sym.ty.clone(),
-                    None => {
-                        //self.ctx.error(format!("Tipo custom no definido: {}", name), 0, 0);
-                        Ty::Unknown
-                    }
-                }
-            }
+            TypeName::Symbol => Ty::Symbol,
+            TypeName::Ion => Ty::Mass,
+            TypeName::Custom(name) => match self.ctx.lookup(name) {
+                Some(sym) => sym.ty.clone(),
+                None => Ty::Unknown,
+            },
             TypeName::Solution(inner) => Ty::Solution(Box::new(self.map_typename_to_ty(inner))),
             TypeName::Sample(inner) => Ty::Sample(Box::new(self.map_typename_to_ty(inner))),
         }
     }
 
     fn type_of_vec_literal(&mut self, items: &[Expr]) -> Ty {
-    if items.is_empty() {
-        self.ctx.error("No se puede inferir el tipo de [ ] vacío; anote con solution<T>", 0, 0);
-        return Ty::Unknown;
-    }
-    let first = self.check_expr(&items[0]);
-    if matches!(first, Ty::Unknown) {
-        return Ty::Unknown;
-    }
-    for e in &items[1..] {
-        let t = self.check_expr(e);
-        if !self.compat(&first, &t) || !self.compat(&t, &first) {
-            self.ctx.error("Los literales de vector deben ser homogéneos", 0, 0);
+        if items.is_empty() {
+            self.ctx.error(
+                "No se puede inferir el tipo de [ ] vacío; anote con solution<T>",
+                0,
+                0,
+            );
             return Ty::Unknown;
         }
-    }
-    Ty::Solution(Box::new(first))
-}
-
-fn type_of_list_literal(&mut self, items: &[Expr]) -> Ty {
-    if items.is_empty() {
-        self.ctx.error("No se puede inferir el tipo de [ ] vacío; anote con sample<T>", 0, 0);
-        return Ty::Unknown;
-    }
-    let first = self.check_expr(&items[0]);
-    if matches!(first, Ty::Unknown) {
-        return Ty::Unknown;
-    }
-    for e in &items[1..] {
-        let t = self.check_expr(e);
-        if !self.compat(&first, &t) || !self.compat(&t, &first) {
-            self.ctx.error("Los literales de lista deben ser homogéneos", 0, 0);
+        let first = self.check_expr(&items[0]);
+        if matches!(first, Ty::Unknown) {
             return Ty::Unknown;
         }
+        for e in &items[1..] {
+            let t = self.check_expr(e);
+            if !self.compat(&first, &t) || !self.compat(&t, &first) {
+                self.ctx
+                    .error("Los literales de vector deben ser homogéneos", 0, 0);
+                return Ty::Unknown;
+            }
+        }
+        Ty::Solution(Box::new(first))
     }
-    Ty::Sample(Box::new(first))
-}
 
-fn type_of_index(&mut self, target: &Expr, index: &Expr) -> Ty {
-    let tt = self.check_expr(target);
-    let ti = self.check_expr(index);
-    if ti != Ty::AtomNum {
-        self.ctx.error("El índice debe ser atom_num (entero ≥ 0)", 0, 0);
-        return Ty::Unknown;
+    fn type_of_list_literal(&mut self, items: &[Expr]) -> Ty {
+        if items.is_empty() {
+            self.ctx.error(
+                "No se puede inferir el tipo de [ ] vacío; anote con sample<T>",
+                0,
+                0,
+            );
+            return Ty::Unknown;
+        }
+        let first = self.check_expr(&items[0]);
+        if matches!(first, Ty::Unknown) {
+            return Ty::Unknown;
+        }
+        for e in &items[1..] {
+            let t = self.check_expr(e);
+            if !self.compat(&first, &t) || !self.compat(&t, &first) {
+                self.ctx
+                    .error("Los literales de lista deben ser homogéneos", 0, 0);
+                return Ty::Unknown;
+            }
+        }
+        Ty::Sample(Box::new(first))
     }
-    match tt {
-        Ty::Solution(inner) => *inner,
-        Ty::Sample(inner) => *inner,
-        _ => {
-            self.ctx.error("La indexación solo aplica a solution<T> o sample<T>", 0, 0);
-            Ty::Unknown
+
+    fn type_of_index(&mut self, target: &Expr, index: &Expr) -> Ty {
+        let tt = self.check_expr(target);
+        let ti = self.check_expr(index);
+        if ti != Ty::AtomNum {
+            self.ctx
+                .error("El índice debe ser atom_num (entero ≥ 0)", 0, 0);
+            return Ty::Unknown;
+        }
+        match tt {
+            Ty::Solution(inner) => *inner,
+            Ty::Sample(inner) => *inner,
+            _ => {
+                self.ctx
+                    .error("La indexación solo aplica a solution<T> o sample<T>", 0, 0);
+                Ty::Unknown
+            }
         }
     }
-}
 
-fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) -> Ty {
-    let rt = self.check_expr(recv);
-    match rt {
-        Ty::Solution(inner) => {
-            match name {
+    fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) -> Ty {
+        let rt = self.check_expr(recv);
+        match rt {
+            Ty::Solution(inner) => match name {
                 "len" => {
                     if !args.is_empty() {
                         self.ctx.error("len() espera 0 argumentos", 0, 0);
@@ -596,7 +671,8 @@ fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) ->
                     }
                     let at = self.check_expr(&args[0]);
                     if !self.compat(&inner, &at) || !self.compat(&at, &inner) {
-                        self.ctx.error("push(x): el tipo de x no coincide con T", 0, 0);
+                        self.ctx
+                            .error("push(x): el tipo de x no coincide con T", 0, 0);
                         return Ty::Unknown;
                     }
                     Ty::VoidState
@@ -628,10 +704,8 @@ fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) ->
                     self.ctx.error("Método desconocido para solution<T>", 0, 0);
                     Ty::Unknown
                 }
-            }
-        }
-        Ty::Sample(inner) => {
-            match name {
+            },
+            Ty::Sample(inner) => match name {
                 "len" => {
                     if !args.is_empty() {
                         self.ctx.error("len() espera 0 argumentos", 0, 0);
@@ -640,19 +714,25 @@ fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) ->
                 }
                 "push_front" | "push_back" => {
                     if args.len() != 1 {
-                        self.ctx.error(&format!("{}(x) espera 1 argumento", name), 0, 0);
+                        self.ctx
+                            .error(&format!("{}(x) espera 1 argumento", name), 0, 0);
                         return Ty::Unknown;
                     }
                     let at = self.check_expr(&args[0]);
                     if !self.compat(&inner, &at) || !self.compat(&at, &inner) {
-                        self.ctx.error(&format!("{}(x): el tipo de x no coincide con T", name), 0, 0);
+                        self.ctx.error(
+                            &format!("{}(x): el tipo de x no coincide con T", name),
+                            0,
+                            0,
+                        );
                         return Ty::Unknown;
                     }
                     Ty::VoidState
                 }
                 "pop_front" | "pop_back" => {
                     if !args.is_empty() {
-                        self.ctx.error(&format!("{}() espera 0 argumentos", name), 0, 0);
+                        self.ctx
+                            .error(&format!("{}() espera 0 argumentos", name), 0, 0);
                     }
                     *inner
                 }
@@ -689,12 +769,15 @@ fn type_of_solution_method(&mut self, recv: &Expr, name: &str, args: &[Expr]) ->
                     self.ctx.error("Método desconocido para sample<T>", 0, 0);
                     Ty::Unknown
                 }
+            },
+            _ => {
+                self.ctx.error(
+                    "Llamada de método: receptor no es solution<T> ni sample<T>",
+                    0,
+                    0,
+                );
+                Ty::Unknown
             }
         }
-        _ => {
-            self.ctx.error("Llamada de método: receptor no es solution<T> ni sample<T>", 0, 0);
-            Ty::Unknown
-        }
     }
-}
 }

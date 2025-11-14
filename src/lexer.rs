@@ -127,6 +127,12 @@ impl Lexer {
                     line,
                     col: sc,
                 },
+                '%' => Token {
+                    kind: TokenKind::Percent,
+                    lexeme: "%".into(),
+                    line,
+                    col: sc,
+                },
                 ';' => Token {
                     kind: TokenKind::Semi,
                     lexeme: ";".into(),

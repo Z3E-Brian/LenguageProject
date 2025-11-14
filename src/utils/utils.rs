@@ -15,6 +15,7 @@ pub fn keyword_kind(s_lower: &str) -> Option<TokenKind> {
         "synthesize" => KwSynthesize,
         "chain" => KwChain,
         "to" => KwTo,
+        "orbite" => KwOrbite,
         // declaración
         "atom" => KwAtom,
         "molecule" => KwMolecule,
