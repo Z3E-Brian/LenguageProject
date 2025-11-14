@@ -1,0 +1,9 @@
+!! Test bucles anidados simples
+chain 2 {
+    emit("Exterior - loop_1 = ", loop_1, "\n");
+    chain 3 {
+        emit("  Interior - loop_1 = ", loop_1, ", loop_2 = ", loop_2, "\n");
+    }
+}
+
+emit("=== Fin test ===\n");
