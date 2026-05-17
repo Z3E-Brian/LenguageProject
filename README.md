@@ -279,7 +279,11 @@ El IDE gráfico (construido con [egui](https://github.com/emilk/egui) / [eframe]
 
 ---
 
-## Autor
+## Autores
 
-**Brian** — Estudiante de Ingeniería en Sistemas, Universidad Nacional de Costa Rica  
-[github.com/Z3E-Brian](https://github.com/Z3E-Brian)
+| Contributor | Área de trabajo |
+|-------------|-----------------|
+| [Z3E-Brian](https://github.com/Z3E-Brian) | Diseño del lenguaje, lexer, parser, análisis semántico, codegen, VM |
+| [MarconiCalvo](https://github.com/MarconiCalvo) | IDE gráfico (egui), entrada interactiva en terminal, bucles anidados, UI/UX |
+
+Proyecto desarrollado en la Universidad Nacional de Costa Rica (UNA).
