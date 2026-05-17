@@ -43,17 +43,15 @@ impl CodeGenerator {
         program: &Program,
     ) -> Result<(Vec<Instruction>, HashMap<String, usize>), String> {
         self.instructions.clear();
+        self.function_table.clear();
         self.var_types.clear();
 
         for stmt in program {
             match stmt {
-                Stmt::ReactionDecl { name, .. } => {
-                    self.function_table
-                        .insert(name.clone(), self.instructions.len());
-                }
                 Stmt::VarDecl { name, ty, .. } | Stmt::ConstDecl { name, ty, .. } => {
                     self.var_types.insert(name.clone(), self.typename_to_ty(ty));
                 }
+                Stmt::ReactionDecl { .. } => {}
                 _ => {}
             }
         }
@@ -69,6 +67,7 @@ impl CodeGenerator {
         match stmt {
             Stmt::VarDecl { name, ty, init } => {
                 let target_ty = self.typename_to_ty(ty);
+                self.var_types.insert(name.clone(), target_ty.clone());
                 self.emit(Instruction::RegisterVarType(
                     name.clone(),
                     target_ty.clone(),
@@ -83,6 +82,7 @@ impl CodeGenerator {
 
             Stmt::ConstDecl { name, ty, value } => {
                 let target_ty = self.typename_to_ty(ty);
+                self.var_types.insert(name.clone(), target_ty.clone());
                 self.emit(Instruction::RegisterVarType(
                     name.clone(),
                     target_ty.clone(),
@@ -141,6 +141,7 @@ impl CodeGenerator {
 
             Stmt::Release(expr) => {
                 self.generate_expr(expr)?;
+                self.emit(Instruction::PopScope);
                 self.emit(Instruction::Return);
                 Ok(())
             }
@@ -488,8 +489,8 @@ impl CodeGenerator {
         }
 
         self.emit(Instruction::LoadConst(Value::Void));
-        self.emit(Instruction::Return);
         self.emit(Instruction::PopScope);
+        self.emit(Instruction::Return);
 
         self.emit(Instruction::Label(skip_label_end.clone()));
 

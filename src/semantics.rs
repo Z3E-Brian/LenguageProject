@@ -286,17 +286,17 @@ impl<'a> SemanticPass<'a> {
             } => {
                 for (cond, _) in arms {
                     let cty = self.check_expr(cond);
-                    if cty == Ty::Unknown || cty != Ty::Polarized {
+                    if cty != Ty::Polarized && cty != Ty::Unknown {
                         self.ctx
                             .error("itest requiere condición polarized (bool)", 0, 0);
                     }
                 }
 
-                self.ctx.push_scope();
                 for (_, then_blk) in arms {
+                    self.ctx.push_scope();
                     self.check_block(then_blk);
+                    self.ctx.pop_scope();
                 }
-                self.ctx.pop_scope();
 
                 if let Some(else_blk) = else_block {
                     self.ctx.push_scope();
@@ -577,7 +577,7 @@ impl<'a> SemanticPass<'a> {
             TypeName::VoidState => Ty::VoidState,
             TypeName::Formula => Ty::Formula,
             TypeName::Symbol => Ty::Symbol,
-            TypeName::Ion => Ty::Mass,
+            TypeName::Ion => Ty::Unknown,
             TypeName::Custom(name) => match self.ctx.lookup(name) {
                 Some(sym) => sym.ty.clone(),
                 None => Ty::Unknown,

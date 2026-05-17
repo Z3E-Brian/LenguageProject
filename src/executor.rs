@@ -77,8 +77,6 @@ impl Executor {
     }
 
     pub fn store_captured_value(&mut self, var_name: &str, value: Value) {
-        self.output.push_str(&format!("{}\n", value.to_string()));
-        
         for scope in self.variables.iter_mut().rev() {
             if scope.contains_key(var_name) {
                 scope.insert(var_name.to_string(), value);
@@ -457,7 +455,7 @@ impl Executor {
                         self.call_stack.push(self.pc);
                         
                         self.pc = func_addr;
-                        Ok(true)
+                        Ok(false)
                     } else {
                         Err(ExecutionError {
                             message: format!("Función '{}' no encontrada", name),
